@@ -1,159 +1,172 @@
-// plugins/imu_integrator/plugin.cpp
-#include <zephyr/kernel.h>
-#include <cstdio>
-#include <cmath>
-#include <chrono>
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-
-#include "../../src/threadloop.hpp"
-#include "../../src/phonebook_new.hpp"
 #include "../../src/plugin_registry.hpp"
-#include "../../src/data_format.hpp"
+#include "../../src/replay.hpp"
+#include "../../src/threadloop.hpp"
+#include "imu_integrator_queue.hpp"
+#if ILLIXR_GPU_PIPELINE
+#include "../../src/pose_prediction.hpp"
+#include "../../src/prediction_adapter.hpp"
+#endif
+#include <cmath>
+#include <zephyr/kernel.h>
 
 using namespace ILLIXR;
-
-// offline_imu pushes ImuMsg* into this queue AND into openvins_imu_queue
-K_MSGQ_DEFINE(imu_integrator_queue, sizeof(ImuMsg*), 500, 4);
-
+K_MSGQ_DEFINE(imu_integrator_queue, sizeof(ImuSample), ILLIXR_IMU_QUEUE_CAPACITY, alignof(ImuSample));
 K_THREAD_STACK_DEFINE(imu_integrator_stack, 65536);
 
 class ImuIntegrator : public threadloop {
-public:
-    explicit ImuIntegrator(phonebook_new& pb)
-        : threadloop{pb, "imu_integrator",
-                     imu_integrator_stack,
-                     K_THREAD_STACK_SIZEOF(imu_integrator_stack),
-                     5}
-        , has_state_{false}
-        , last_t_{-1.0}
-        , position_ {Eigen::Vector3d::Zero()}
-        , velocity_ {Eigen::Vector3d::Zero()}
-        , orientation_{Eigen::Quaterniond::Identity()}
-        , bias_gyro_ {Eigen::Vector3d::Zero()}
-        , bias_accel_{Eigen::Vector3d::Zero()}
-        , gravity_   {0.0, 0.0, -9.81}
-    {
-        printf("[ImuIntegrator] constructed\n");
-    }
+  public:
+    explicit ImuIntegrator(phonebook_new &pb)
+        : threadloop{pb, "imu_integrator", imu_integrator_stack, K_THREAD_STACK_SIZEOF(imu_integrator_stack), 5,
+                     replay::requested_hart(replay::IMU_INTEGRATOR_WORKER)} {}
 
-    void _p_thread_setup() override {
-        printf("[ImuIntegrator] setup tid=%p\n", k_current_get());
-
-        // subscribe_from: static function pointer + void* context (this)
-        // "openvins" is the sender name (matches REGISTER_PLUGIN(openvins))
-        node().subscribe_from<ImuIntegratorInput>(
-            "openvins",
-            &ImuIntegrator::on_vio_state_cb,
-            this);
-    }
-
+  protected:
     skip_option _p_should_skip() override {
-        if (!has_state_)
-            return skip_option::skip_and_yield;
-        if (k_msgq_num_used_get(&imu_integrator_queue) == 0)
-            return skip_option::skip_and_yield;
+        if (atomic_get(&replay::imu_done) && atomic_get(&replay::vio_done) &&
+            k_msgq_num_used_get(&imu_integrator_queue) == 0) {
+            if (apply_latest_baseline())
+                publish();
+            return skip_option::stop;
+        }
         return skip_option::run;
     }
-
     void _p_one_iteration() override {
-        ImuMsg* imu = nullptr;
-        if (k_msgq_get(&imu_integrator_queue, &imu, K_NO_WAIT) != 0 || !imu)
-            return;
-
-        double t = static_cast<double>(
-            imu->time.time_since_epoch().count()) * 1e-9;
-
-        double dt = (last_t_ < 0.0) ? 0.0 : (t - last_t_);
-        last_t_ = t;
-
-        if (dt <= 0.0 || dt > 0.1) {
-            delete imu;
-            return;
+        ImuSample sample;
+        if (k_msgq_get(&imu_integrator_queue, &sample, K_MSEC(1)) == 0) {
+            const ImuMsg msg = imu_message(sample);
+            if (history_size_ == history_capacity) {
+                history_begin_ = (history_begin_ + 1) % history_capacity;
+                --history_size_;
+                history_wrapped_ = true;
+            }
+            history_[(history_begin_ + history_size_) % history_capacity] = msg;
+            ++history_size_;
+            replay::highwater(replay::INTEGRATOR_HISTORY_HIGHWATER, history_size_);
+            replay::count(replay::IMU_INTEGRATOR);
+            replay::record_placement(replay::IMU_INTEGRATOR_WORKER);
+            const bool reset = apply_latest_baseline();
+            if (!reset && has_state_)
+                integrate(msg);
+            publish();
+        } else {
+            if (apply_latest_baseline())
+                publish();
         }
+    }
+    void _p_thread_teardown() override {
+        // Producers may still be finishing on failure; runtime drains any final records after joins.
+        k_msgq_purge(&imu_integrator_queue);
+        atomic_set(&replay::integrator_done, 1);
+    }
 
-        // ── Remove biases ─────────────────────────────────────────────────
-        Eigen::Vector3d gyro  = imu->angular_v - bias_gyro_;
-        Eigen::Vector3d accel = imu->linear_a  - bias_accel_;
-        delete imu;
-
-        // ── Rotate accel IMU → global frame ──────────────────────────────
-        // orientation_ = q_GtoI  →  R_ItoG = R_GtoI^T
+  private:
+    static constexpr size_t history_capacity = 4096;
+    ImuMsg history_[history_capacity];
+    size_t history_begin_{}, history_size_{};
+    bool history_wrapped_{}, has_state_{};
+    uint64_t baseline_sequence_{};
+    int64_t baseline_ts_{-1}, last_ts_{-1}, published_ts_{-1};
+    double last_t_{-1};
+    Eigen::Vector3d position_{Eigen::Vector3d::Zero()}, velocity_{Eigen::Vector3d::Zero()};
+    Eigen::Quaterniond orientation_{Eigen::Quaterniond::Identity()};
+    Eigen::Vector3d bias_gyro_{Eigen::Vector3d::Zero()}, bias_accel_{Eigen::Vector3d::Zero()}, gravity_{0, 0, -9.81};
+    bool apply_latest_baseline() {
+        ImuIntegratorInput input{};
+        uint64_t seq{};
+        if (!replay::vio_baseline.read(input, seq) || seq == baseline_sequence_)
+            return false;
+        baseline_sequence_ = seq;
+        const auto ts = input.timestamp.time_since_epoch().count();
+        if (ts <= baseline_ts_)
+            return false;
+        if (history_wrapped_ && history_size_ && ts < history_[history_begin_].time.time_since_epoch().count()) {
+            replay::fail("VIO baseline predates retained IMU history");
+            return false;
+        }
+        baseline_ts_ = ts;
+        last_ts_ = ts;
+        last_t_ = static_cast<double>(ts) * 1e-9;
+        position_ = input.position;
+        velocity_ = input.velocity;
+        orientation_ = input.orientation.normalized();
+        bias_gyro_ = input.bias_gyro;
+        bias_accel_ = input.bias_accel;
+        gravity_ = input.params.n_gravity;
+        has_state_ = true;
+        for (size_t i = 0; i < history_size_; ++i)
+            integrate(history_[(history_begin_ + i) % history_capacity]);
+        return true;
+    }
+    void integrate(const ImuMsg &imu) {
+        const auto ts = imu.time.time_since_epoch().count();
+        if (ts <= last_ts_)
+            return;
+        const double t = static_cast<double>(ts) * 1e-9;
+        const double dt = (last_t_ < 0) ? 0 : (t - last_t_);
+        last_ts_ = ts;
+        last_t_ = t;
+        if (dt <= 0 || dt > 0.1)
+            return;
+        // Existing integration equations are intentionally unchanged.
+        Eigen::Vector3d gyro = imu.angular_v - bias_gyro_;
+        Eigen::Vector3d accel = imu.linear_a - bias_accel_;
         Eigen::Matrix3d R_ItoG = orientation_.toRotationMatrix().transpose();
         Eigen::Vector3d accel_global = R_ItoG * accel;
-
-        // ── Remove gravity ────────────────────────────────────────────────
-        // gravity_ = {0,0,-9.81}: subtract to get true acceleration
         Eigen::Vector3d accel_true = accel_global - gravity_;
-
-        // ── Integrate position + velocity (Euler) ─────────────────────────
         position_ += velocity_ * dt + 0.5 * accel_true * dt * dt;
         velocity_ += accel_true * dt;
-
-        // ── Integrate orientation ─────────────────────────────────────────
-        // gyro in IMU frame, right-multiply onto q_GtoI
         double angle = gyro.norm() * dt;
         if (angle > 1e-10) {
             Eigen::Quaterniond dq(Eigen::AngleAxisd(angle, gyro.normalized()));
             orientation_ = (orientation_ * dq).normalized();
         }
-
-        // ── Publish ───────────────────────────────────────────────────────
-        PoseMsg out{
-            ILLIXR::time_point{std::chrono::nanoseconds{
-                static_cast<long long>(t * 1e9)}},
-            position_.cast<float>(),
-            orientation_.cast<float>().normalized()
-        };
-        // "renderer" is the receiver name (matches REGISTER_PLUGIN(renderer))
-        node().publish_to<PoseMsg>("renderer", out);
-
-        printf("[ImuIntegrator] t=%.4f  pos=[%.3f,%.3f,%.3f]\n",
-               t, position_.x(), position_.y(), position_.z());
     }
-
-private:
-    bool   has_state_;
-    double last_t_;
-
-    // Integration state — exact types from ImuIntegratorInput
-    Eigen::Vector3d    position_;     // p_IinG  metres, global frame
-    Eigen::Vector3d    velocity_;     // v_IinG  m/s,    global frame
-    Eigen::Quaterniond orientation_;  // q_GtoI  global → IMU
-    Eigen::Vector3d    bias_gyro_;    // rad/s
-    Eigen::Vector3d    bias_accel_;   // m/s²
-    Eigen::Vector3d    gravity_;      // {0,0,-9.81} m/s²
-
-    // Static callback required by subscribe_from API
-    static void on_vio_state_cb(void* ctx, const ImuIntegratorInput& msg) {
-        static_cast<ImuIntegrator*>(ctx)->on_vio_state(msg);
-    }
-
-    void on_vio_state(const ImuIntegratorInput& msg) {
-        // Reset integration baseline to authoritative VIO state
-        // Field mapping from ImuIntegratorInput (data_format.hpp):
-        position_    = msg.position;            // p_IinG  Vector3d
-        velocity_    = msg.velocity;            // v_IinG  Vector3d
-        orientation_ = msg.orientation.normalized(); // q_GtoI Quaterniond
-        bias_gyro_   = msg.bias_gyro;           // Vector3d
-        bias_accel_  = msg.bias_accel;          // Vector3d
-        gravity_     = msg.params.n_gravity;    // {0,0,-9.81} Vector3d
-
-        last_t_ = static_cast<double>(
-            msg.timestamp.time_since_epoch().count()) * 1e-9;
-        has_state_ = true;
-
-        printf("[ImuIntegrator] VIO reset  t=%.4f"
-               "  pos=[%.3f,%.3f,%.3f]  vel=[%.3f,%.3f,%.3f]\n",
-               last_t_,
-               position_.x(), position_.y(), position_.z(),
-               velocity_.x(), velocity_.y(), velocity_.z());
+    void publish() {
+        if (!has_state_ || last_ts_ < published_ts_)
+            return;
+        PoseMsg out{time_point{duration{last_ts_}}, position_.cast<float>(), orientation_.cast<float>().normalized()};
+        if (!replay::valid_pose(out)) {
+            replay::fail("invalid propagated pose");
+            return;
+        }
+        replay::propagated_pose.publish(out);
+#if ILLIXR_GPU_PIPELINE
+        // Export a coherent value snapshot. Prediction never reads this
+        // worker's mutable integration state, and no integration equations
+        // change when the downstream profile is enabled.
+        const ImuMsg *latest = nullptr, *previous = nullptr;
+        for (size_t i = history_size_; i > 0; --i) {
+            const auto &sample = history_[(history_begin_ + i - 1) % history_capacity];
+            if (sample.time.time_since_epoch().count() > last_ts_)
+                continue;
+            if (!latest)
+                latest = &sample;
+            else {
+                previous = &sample;
+                break;
+            }
+        }
+        if (latest && previous) {
+            PredictionState state;
+            state.timestamp_ns = last_ts_;
+            state.previous_timestamp_ns = previous->time.time_since_epoch().count();
+            state.position = position_;
+            state.velocity = velocity_;
+            // Adapt both the quaternion and angular-rate convention. A
+            // quaternion-only conversion would reverse predicted rotation
+            // relative to this integrator's unchanged right-multiplied update.
+            adapt_integrator_rotation(state, orientation_,
+                previous->angular_v - bias_gyro_, latest->angular_v - bias_gyro_);
+            state.a_hat = previous->linear_a - bias_accel_;
+            state.a_hat2 = latest->linear_a - bias_accel_;
+            prediction_state.publish(state);
+        }
+#endif
+        replay::record_placement(replay::IMU_INTEGRATOR_WORKER, true);
+        published_ts_ = last_ts_;
     }
 };
-
-void start_imu_integrator(phonebook_new& pb) {
+void start_imu_integrator(phonebook_new &pb) {
     static ImuIntegrator instance{pb};
     instance.start();
 }
-
 REGISTER_PLUGIN(imu_integrator);

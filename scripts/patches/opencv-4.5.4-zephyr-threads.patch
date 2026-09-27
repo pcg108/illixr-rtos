@@ -1,0 +1,64 @@
+diff --git a/modules/core/include/opencv2/core/utility.hpp b/modules/core/include/opencv2/core/utility.hpp
+index 108c0d9..62ff79a 100644
+--- a/modules/core/include/opencv2/core/utility.hpp
++++ b/modules/core/include/opencv2/core/utility.hpp
+@@ -714,7 +714,22 @@ void Mat::forEach_impl(const Functor& operation) {
+ /////////////////////////// Synchronization Primitives ///////////////////////////////
+ 
+ #if !defined(_M_CEE)
+-#ifndef OPENCV_DISABLE_THREAD_SUPPORT
++#if defined(__ZEPHYR__)
++// The embedded GCC library has no gthreads. Use a recursive Zephyr mutex.
++class CV_EXPORTS Mutex {
++public:
++    Mutex();
++    ~Mutex();
++    void lock();
++    void unlock();
++    bool try_lock();
++    Mutex(const Mutex&) = delete;
++    Mutex& operator=(const Mutex&) = delete;
++private:
++    void* state_;
++};
++typedef std::lock_guard<cv::Mutex> AutoLock;
++#elif !defined(OPENCV_DISABLE_THREAD_SUPPORT)
+ typedef std::recursive_mutex Mutex;
+ typedef std::lock_guard<cv::Mutex> AutoLock;
+ #else // OPENCV_DISABLE_THREAD_SUPPORT
+diff --git a/modules/core/src/system.cpp b/modules/core/src/system.cpp
+index f3f47e4..a80e200 100644
+--- a/modules/core/src/system.cpp
++++ b/modules/core/src/system.cpp
+@@ -1,3 +1,7 @@
++// Retain OpenCV TLS for concurrent Zephyr k_threads; the worker pool remains off.
++#if defined(__ZEPHYR__)
++#undef OPENCV_DISABLE_THREAD_SUPPORT
++#endif
+ /*M///////////////////////////////////////////////////////////////////////////////////////
+ //
+ //  IMPORTANT: READ BEFORE DOWNLOADING, COPYING, INSTALLING OR USING.
+@@ -1516,6 +1520,23 @@ void TlsAbstraction::setData(void *pData)
+ #endif // CV_USE_FLS
+ }
+ #endif // WINRT
++#elif defined(__ZEPHYR__)
++// POSIX keys only accept pthread-created threads in this Zephyr revision.
++static thread_local void* zephyr_tls_data = nullptr;
++TlsAbstraction::TlsAbstraction() : disposed(false) {}
++void TlsAbstraction::releaseSystemResources()
++{
++    cv::__termination = true;
++    disposed = true;
++}
++void* TlsAbstraction::getData() const
++{
++    return disposed ? nullptr : zephyr_tls_data;
++}
++void TlsAbstraction::setData(void* pData)
++{
++    if (!disposed) zephyr_tls_data = pData;
++}
+ #else // _WIN32
+ static void opencv_tls_destructor(void* pData);
+ TlsAbstraction::TlsAbstraction()

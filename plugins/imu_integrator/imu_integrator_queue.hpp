@@ -1,10 +1,5 @@
 #pragma once
-#include <zephyr/kernel.h>
+#include "../openvins/openvins_queues.hpp"
 
-// ============================================================================
-// Shared message queues (defined in openvins/plugin.cpp via K_MSGQ_DEFINE)
-//
-// Both carry POINTERS to avoid Eigen alignment faults from k_msgq memcpy.
-// Producers push directly, consumer (openvins) pulls directly.
-// ============================================================================
-extern struct k_msgq imu_integrator_queue;   // carries ImuMsg*
+// Independent IMU subscriber queue; each record is copied into the queue.
+extern struct k_msgq imu_integrator_queue;  // ILLIXR::ImuSample by value

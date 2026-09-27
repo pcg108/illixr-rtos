@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <ratio>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>   // Zephyr-native atomic — replaces std::atomic
 
 namespace ILLIXR {
@@ -11,7 +12,7 @@ namespace ILLIXR {
 /**
  * Mimic of `std::chrono::time_point<Clock, Rep>`.
  */
-using _clock_rep      = long;
+using _clock_rep      = std::int64_t;
 using _clock_period   = std::nano;
 using _clock_duration = std::chrono::duration<_clock_rep, _clock_period>;
 
@@ -83,41 +84,29 @@ public:
     static constexpr bool is_steady = true;
     static_assert(std::chrono::steady_clock::is_steady);
 
-    RelativeClock() {
-        atomic_set(&_dataset_origin_ns, (atomic_val_t)-1);
-    }
+    RelativeClock() { atomic_set(&_dataset_origin_ns, -1); }
 
     [[nodiscard]] tp now() const {
-        assert(is_started() && "Cannot call now() before start()");
-        auto delta = std::chrono::duration_cast<duration>(
-            std::chrono::steady_clock::now() - _m_start);
-        return tp{delta};
+        assert(is_started());
+        return tp{duration{static_cast<std::int64_t>(k_cyc_to_ns_floor64(k_cycle_get_64() - _start_cycles))}};
     }
-
-    [[nodiscard]] std::int64_t now_ns() const {
-        return static_cast<std::int64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                now().time_since_epoch()).count());
-    }
-
+    [[nodiscard]] std::int64_t now_ns() const { return now().time_since_epoch().count(); }
+    // Absolute here means the timer's boot epoch, never civil/UTC time.
     [[nodiscard]] std::int64_t absolute_ns(tp relative) const {
-        auto base_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           _m_start.time_since_epoch()).count();
-        auto offset_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             relative.time_since_epoch()).count();
-        return static_cast<std::int64_t>(base_ns + offset_ns);
+        return static_cast<std::int64_t>(k_cyc_to_ns_floor64(_start_cycles)) + relative.time_since_epoch().count();
     }
-
     void start() {
-        _m_start  = std::chrono::steady_clock::now();
-        _started  = true;
+        _start_cycles = k_cycle_get_64();
+        _start_ticks = k_uptime_ticks();
+        atomic_set(&_started, 1);
     }
-
-    [[nodiscard]] bool is_started() const { return _started; }
-
+    [[nodiscard]] bool is_started() const { return atomic_get(&_started) != 0; }
     [[nodiscard]] tp start_time() const {
-        auto dur = std::chrono::duration_cast<duration>(_m_start.time_since_epoch());
-        return tp{dur};
+        return tp{duration{static_cast<std::int64_t>(k_cyc_to_ns_floor64(_start_cycles))}};
+    }
+    [[nodiscard]] std::int64_t dataset_origin_ns() const { return atomic_get(&_dataset_origin_ns); }
+    [[nodiscard]] std::int64_t absolute_ticks(std::int64_t runtime_ns) const {
+        return _start_ticks + k_ns_to_ticks_ceil64(runtime_ns > 0 ? runtime_ns : 0);
     }
 
     void print() const;
@@ -131,9 +120,9 @@ public:
     // set_dataset_origin()).
     //
     // Any plugin can then call dataset_now_ns() to find out which dataset
-    // timestamp corresponds to the current wall-clock instant:
+    // timestamp corresponds to the current timer instant:
     //
-    //   dataset_now = dataset_origin + wall_elapsed_since_start
+    //   dataset_now = dataset_origin + timer_elapsed_since_start
     //
     // This gives all plugins the SAME answer for "what time is it in the
     // dataset?", so they independently decide when to fire without racing.
@@ -159,12 +148,12 @@ public:
     /**
      * @brief Returns the current dataset timestamp in nanoseconds.
      *
-     * dataset_now = dataset_origin + (wall_clock elapsed since start())
+     * dataset_now = dataset_origin + (timer elapsed since start())
      *
      * Returns -1 if the clock hasn't been started or origin hasn't been set.
      */
     [[nodiscard]] std::int64_t dataset_now_ns() const {
-        if (!_started) return -1;
+        if (!is_started()) return -1;
         std::int64_t origin = (std::int64_t)atomic_get(&_dataset_origin_ns);
         if (origin < 0) return -1;
         return origin + now_ns();
@@ -180,8 +169,9 @@ public:
     }
 
 private:
-    std::chrono::steady_clock::time_point _m_start{};
-    bool                                  _started{false};
+    std::uint64_t _start_cycles{};
+    std::int64_t _start_ticks{};
+    mutable atomic_t _started{};
 
     // atomic_t is Zephyr's RTOS-native atomic integer.
     // On rv64, atomic_val_t == intptr_t == int64_t — exactly what we need.

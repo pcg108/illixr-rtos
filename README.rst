@@ -22,3 +22,40 @@ Each plugin class should inherit from the threadloop class and implement the nec
 The data for the offline_cam, offline_imu are not uploaded on github. 
 I essentially used embed_euroc_data.py to convert the data into a C++ header file and then included that header file in the respective plugins through CMakeLists.txt. You can do the same for your own data if you want to add more plugins that require data.
 
+
+
+Spike clock-paced replay
+------------------------
+
+See ``docs/spike-clock-replay.md`` for the isolated toolchain setup, embedded
+EuRoC datasets, single/dual-hart builds, runtime semantics, and validation commands.
+Measured results and numerical limitations are recorded in ``docs/spike-results.md``.
+
+Rocket RTL validation
+---------------------
+
+See ``docs/rocket-validation.md`` for single-, dual-, and quad-core Rocket
+Verilator builds, platform checks, plugin affinity, and per-plugin hart evidence.
+The Rocket firmware uses the generated hardware timer frequency and keeps the
+same bounded 50-pair dataset and estimator math as the Spike validation.
+``docs/rocket-results.md`` records verified startup results and links to the
+automatically updated workload comparison report.
+
+FireSim validation and IMU transport
+-----------------------------------
+
+See ``docs/firesim-validation.md`` for the local U250 setup and preserved
+diagnostic history. ``docs/imu-value-transport.md`` describes the application
+change that replaces per-sample IMU allocations with independent queue records.
+The updated single-, dual-, and quad-core FireSim matrix passes all five workload
+cases on the original Zephyr kernel, with unchanged estimator math and dataset.
+
+Prediction and simulated GPU stages
+-----------------------------------
+
+The ``gpu_pipeline`` profile adds desktop RK4 pose prediction and independent
+render/timewarp workers. Rendering and timewarp model asynchronous GPU delays;
+the dummy stereo image remains unchanged. See ``docs/gpu-pipeline.md`` for
+interfaces, timing assumptions, bounded storage, and validation details.
+``scripts/run_gpu_pipeline.py`` validates dual/quad Spike before allowing the
+quad-core FireSim workload.

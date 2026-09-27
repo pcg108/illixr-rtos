@@ -1,0 +1,16 @@
+/* Shared by the standard Rocket, DualRocket, and QuadRocket configurations. */
+&{/} {
+  model = "Chipyard Rocket";
+  compatible = "ucbbar,chipyard-dev";
+};
+&{/cpus} { timebase-frequency = <500000>; };
+&ram0 { reg = <0x80000000 0x10000000>; };
+/* One implemented UART interrupt; the application uses only HTIF. */
+&plic {
+  riscv,ndev = <1>;
+  riscv,max-priority = <1>;
+};
+&uart0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };
+&flash0 { status = "disabled"; };
+&htif { status = "okay"; };

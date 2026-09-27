@@ -141,8 +141,8 @@ private:
     phonebook_new* pb_;
     char           name_[MAX_PLUGIN_NAME_LEN];
     std::vector<std::unique_ptr<PeriodicJobBase>> periodic_jobs_;
-    ShutdownCallback shutdown_cb_;
-    void* shutdown_ctx_;};
+    ShutdownCallback shutdown_cb_{};
+    void* shutdown_ctx_{};};
 
 } // namespace ILLIXR
 

@@ -38,7 +38,7 @@ if(NOT DEFINED CMAKE_SIZEOF_VOID_P)
   set(CMAKE_SIZEOF_VOID_P 8 CACHE STRING "Pointer size" FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================
@@ -56,7 +56,67 @@ add_link_options(${RV64_FLAGS})
 # ============================================================
 
 # Path to OpenCV source
-set(OPENCV_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../third-party/opencv)
+set(OPENCV_SRC_DIR "" CACHE PATH "Pinned OpenCV 4.5.4 source tree")
+if(NOT EXISTS "${OPENCV_SRC_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "Set OPENCV_SRC_DIR to the OpenCV 4.5.4 source checkout")
+endif()
+set(ILLIXR_DATASET_DIR "" CACHE PATH "EuRoC mav0 input directory")
+set(ILLIXR_DATASET_FRAMES 50 CACHE STRING "Number of embedded stereo pairs")
+set(ILLIXR_DATA_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated" CACHE PATH "Generated embedded dataset headers")
+set(ILLIXR_CAM_QUEUE_CAPACITY 8 CACHE STRING "Pending stereo frames")
+set(ILLIXR_IMU_QUEUE_CAPACITY 4096 CACHE STRING "IMU records per subscriber")
+set(ILLIXR_VIO_DELAY_MS 0 CACHE STRING "One-time VIO delay for overload testing")
+set(ILLIXR_VIO_DELAY_AFTER_CAM 1 CACHE STRING "Processed camera count before test delay")
+option(ILLIXR_PIN_PLUGINS "Use fixed per-plugin CPU affinity" OFF)
+option(ILLIXR_PLATFORM_CHECK_ONLY "Exit after hart, atomic and timer checks" OFF)
+set(ILLIXR_CORE_HZ 0 CACHE STRING "Hardware core clock for timer-ratio validation; zero skips ratio check")
+set(ILLIXR_DISPLAY_HZ 120 CACHE STRING "Simulated display refresh rate")
+set(ILLIXR_RENDER_DELAY_NS 6944445 CACHE STRING "Asynchronous render latency in target nanoseconds")
+set(ILLIXR_TIMEWARP_DELAY_NS 1000000 CACHE STRING "Asynchronous timewarp latency in target nanoseconds")
+set(ILLIXR_RENDER_OFFSET_NS 1000000 CACHE STRING "Render start offset after vsync")
+set(ILLIXR_TIMEWARP_MARGIN_NS 1000000 CACHE STRING "Timewarp scheduling margin before GPU work")
+target_compile_definitions(app PRIVATE
+  ILLIXR_PIN_PLUGINS=$<BOOL:${ILLIXR_PIN_PLUGINS}>
+  ILLIXR_PLATFORM_CHECK_ONLY=$<BOOL:${ILLIXR_PLATFORM_CHECK_ONLY}>
+  ILLIXR_CORE_HZ=${ILLIXR_CORE_HZ})
+# Keep neutral definitions stable for third-party objects across replay tests.
+# Only queue-owning plugins override these knobs; producers use k_msgq metadata.
+add_compile_definitions(
+  ILLIXR_CAM_QUEUE_CAPACITY=8
+  ILLIXR_IMU_QUEUE_CAPACITY=4096
+  ILLIXR_VIO_DELAY_MS=0
+  ILLIXR_VIO_DELAY_AFTER_CAM=1)
+function(illixr_replay_overrides target)
+  set(default_ILLIXR_CAM_QUEUE_CAPACITY 8)
+  set(default_ILLIXR_IMU_QUEUE_CAPACITY 4096)
+  set(default_ILLIXR_VIO_DELAY_MS 0)
+  set(default_ILLIXR_VIO_DELAY_AFTER_CAM 1)
+  foreach(knob ILLIXR_CAM_QUEUE_CAPACITY ILLIXR_IMU_QUEUE_CAPACITY
+               ILLIXR_VIO_DELAY_MS ILLIXR_VIO_DELAY_AFTER_CAM)
+    if(NOT "${${knob}}" STREQUAL "${default_${knob}}")
+      target_compile_options(${target} PRIVATE "-U${knob}" "-D${knob}=${${knob}}")
+    endif()
+  endforeach()
+endfunction()
+include_directories("${ILLIXR_DATA_INCLUDE_DIR}")
+add_custom_command(
+  OUTPUT "${ILLIXR_DATA_INCLUDE_DIR}/embedded_imu.hpp"
+         "${ILLIXR_DATA_INCLUDE_DIR}/embedded_cam.hpp"
+         "${ILLIXR_DATA_INCLUDE_DIR}/embedded_dataset.hpp"
+         "${ILLIXR_DATA_INCLUDE_DIR}/dataset_manifest.json"
+  COMMAND ${PYTHON_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/plugins/openvins/embed_euroc_data.py"
+          "${ILLIXR_DATASET_DIR}" "${ILLIXR_DATA_INCLUDE_DIR}" ${ILLIXR_DATASET_FRAMES}
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plugins/openvins/embed_euroc_data.py"
+          "${ILLIXR_DATASET_DIR}/imu0/data.csv"
+          "${ILLIXR_DATASET_DIR}/cam0/data.csv"
+          "${ILLIXR_DATASET_DIR}/cam1/data.csv"
+  COMMENT "Embedding bounded EuRoC dataset" VERBATIM)
+add_custom_target(generate_dataset DEPENDS
+  "${ILLIXR_DATA_INCLUDE_DIR}/embedded_imu.hpp"
+  "${ILLIXR_DATA_INCLUDE_DIR}/embedded_cam.hpp"
+  "${ILLIXR_DATA_INCLUDE_DIR}/embedded_dataset.hpp"
+  "${ILLIXR_DATA_INCLUDE_DIR}/dataset_manifest.json")
+add_dependencies(app generate_dataset)
 
 # If your OpenCV needs linker script fragments, apply at top-level (final link)
 zephyr_linker_sources(SECTIONS
@@ -86,6 +146,17 @@ set(BUILD_PERF_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
 
+foreach(feature OPENCL OPENCLAMDFFT OPENCLAMDBLAS IPP ITT TBB OPENMP LAPACK PROTOBUF
+                QUIRC WEBP GDCM V4L FFMPEG GSTREAMER GTK QT CAROTENE)
+  set(WITH_${feature} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(OPENCV_ENABLE_NONFREE OFF CACHE BOOL "" FORCE)
+set(OPENCV_GENERATE_PKGCONFIG OFF CACHE BOOL "" FORCE)
+set(ENABLE_PRECOMPILED_HEADERS OFF CACHE BOOL "" FORCE)
+set(CV_ENABLE_INTRINSICS OFF CACHE BOOL "" FORCE)
+
+set(CPU_BASELINE "" CACHE STRING "" FORCE)
+set(CPU_DISPATCH "" CACHE STRING "" FORCE)
 set(WITH_TIFF OFF CACHE BOOL "" FORCE)
 set(BUILD_TIFF OFF CACHE BOOL "" FORCE)
 set(WITH_OPENEXR OFF CACHE BOOL "" FORCE)
@@ -117,18 +188,18 @@ add_compile_definitions(
 # Build OpenCV in the main build tree
 add_subdirectory(${OPENCV_SRC_DIR} ${CMAKE_CURRENT_BINARY_DIR}/opencv_build)
 
-# ============================================================
-# === OpenCV support shim (compile ONCE) =====================
-# ============================================================
-
-# atomic_shim.c provides missing atomics / builtins for OpenCV under Zephyr.
-# Compile it once to avoid multiple-definition problems.
-add_library(illixr_opencv_support STATIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/plugins/opencv/src/atomic_shim.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/plugins/opencv/src/libatomic_exchange_1_shim.c
-)
-
-target_link_libraries(illixr_opencv_support PRIVATE zephyr_interface)
+# SDK GCC 12 emits __atomic_exchange_1 and ships no libatomic.
+# One ABI-correct, sequentially consistent LR/SC fallback supplies it.
+target_sources(app PRIVATE plugins/opencv/src/atomic_shim.c)
+foreach(cv_target opencv_core opencv_imgproc opencv_imgcodecs zlib libpng libjpeg-turbo)
+  if(TARGET ${cv_target})
+    set_property(TARGET ${cv_target} APPEND PROPERTY LINK_LIBRARIES zephyr_interface)
+  endif()
+endforeach()
+foreach(cv_target opencv_core opencv_imgproc opencv_imgcodecs)
+  target_compile_options(${cv_target} PRIVATE
+    "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/plugins/opencv/src/zephyr_compat.hpp")
+endforeach()
 
 # ============================================================
 # === OpenCV bundle target used by app + plugins =============
@@ -152,7 +223,6 @@ target_link_libraries(illixr_opencv INTERFACE
   opencv_core
   opencv_imgproc
   opencv_imgcodecs
-  illixr_opencv_support
   -Wl,--end-group
 )
 
@@ -162,6 +232,11 @@ endif()
 
 # Make OpenCV available to non-plugin app code too
 target_link_libraries(app PRIVATE illixr_opencv)
+target_include_directories(app PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${ZEPHYR_BASE}/../modules/lib/eigen")
+target_compile_options(app PRIVATE
+  "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${ILLIXR_HELPER_DIR}/opencv_helper.hpp>"
+  "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${ILLIXR_HELPER_DIR}/eigen_lib_fix.hpp>")
+target_sources(app PRIVATE plugins/opencv/src/zephyr_support.cpp)
 
 # ============================================================
 # === YAML CONFIG PARSING ====================================
@@ -179,12 +254,13 @@ set(GENERATED_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/generated_config.hpp")
 
 add_custom_command(
   OUTPUT ${GENERATED_CONFIG}
-  COMMAND ${Python3_EXECUTABLE} ${READ_YAML_SCRIPT} ${YAML_FILE} ${GENERATED_CONFIG}
+  COMMAND ${PYTHON_EXECUTABLE} ${READ_YAML_SCRIPT} ${YAML_FILE} ${GENERATED_CONFIG}
   DEPENDS ${READ_YAML_SCRIPT} ${YAML_FILE}
   COMMENT "Parsing YAML and generating ${GENERATED_CONFIG}"
 )
 
 add_custom_target(generate_yaml ALL DEPENDS ${GENERATED_CONFIG})
+add_dependencies(app generate_yaml)
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 # ============================================================
@@ -197,7 +273,6 @@ target_sources(app PRIVATE
   src/relative_clock.cpp
   src/phonebook_new.cpp
   src/stoplight.cpp
-  data/V1_02_medium/mav0/imu0/data.csv
 )
 
 # ============================================================
@@ -240,6 +315,21 @@ if(PLUGIN_LINE)
 
   message(STATUS "Resolved plugins: ${PLUGIN_NAMES_CLEAN}")
 
+  if("render_loop" IN_LIST PLUGIN_NAMES_CLEAN)
+    if(NOT "pose_prediction" IN_LIST PLUGIN_NAMES_CLEAN OR NOT "timewarp" IN_LIST PLUGIN_NAMES_CLEAN)
+      message(FATAL_ERROR "The GPU pipeline requires pose_prediction, render_loop and timewarp")
+    endif()
+    add_compile_definitions(ILLIXR_GPU_PIPELINE=1)
+    add_compile_definitions(
+      ILLIXR_DISPLAY_HZ=${ILLIXR_DISPLAY_HZ}
+      ILLIXR_RENDER_DELAY_NS=${ILLIXR_RENDER_DELAY_NS}
+      ILLIXR_TIMEWARP_DELAY_NS=${ILLIXR_TIMEWARP_DELAY_NS}
+      ILLIXR_RENDER_OFFSET_NS=${ILLIXR_RENDER_OFFSET_NS}
+      ILLIXR_TIMEWARP_MARGIN_NS=${ILLIXR_TIMEWARP_MARGIN_NS})
+  else()
+    add_compile_definitions(ILLIXR_GPU_PIPELINE=0)
+  endif()
+
   foreach(P IN LISTS PLUGIN_NAMES_CLEAN)
     set(PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/${P}")
     message(STATUS "Adding plugin '${P}' from ${PLUGIN_DIR}")
@@ -247,6 +337,11 @@ if(PLUGIN_LINE)
     add_subdirectory("${PLUGIN_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/plugins/${P}")
 
     if(TARGET ${P})
+      target_compile_definitions(${P} PRIVATE ILLIXR_PIN_PLUGINS=$<BOOL:${ILLIXR_PIN_PLUGINS}>)
+      if(P STREQUAL "openvins" OR P STREQUAL "imu_integrator")
+        illixr_replay_overrides(${P})
+      endif()
+      add_dependencies(${P} generate_dataset)
       target_sources(app PRIVATE $<TARGET_OBJECTS:${P}>)
       message(STATUS "Added plugin '${P}' object files into app")
     else()

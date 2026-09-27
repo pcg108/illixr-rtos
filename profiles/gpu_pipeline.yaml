@@ -1,0 +1,8 @@
+# Independent CPU workers with asynchronous, fixed-duration GPU models.
+plugins: offline_imu, offline_cam, openvins, imu_integrator, pose_prediction, render_loop, timewarp
+duration: 5
+build_type: Release
+enable_offload: False
+enable_alignment: False
+enable_verbose_errors: False
+enable_pre_sleep: False

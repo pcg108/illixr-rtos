@@ -1,162 +1,169 @@
 #!/usr/bin/env python3
-"""
-embed_euroc_data.py
+"""Embed a validated EuRoC prefix in build-directory C++ headers.
 
-Reads EuRoC MAV dataset and generates C++ headers:
-  - embedded_imu.hpp   : IMU samples as a struct array
-  - embedded_cam.hpp   : PNG file bytes as uint8_t arrays + index table
-
-Usage:
-  python3 embed_euroc_data.py <euroc_mav0_dir> <output_dir> [num_cam_frames]
-
-Example:
-  python3 embed_euroc_data.py data/V1_02_medium/mav0 generated 50
+Usage: embed_euroc_data.py <mav0_dir> <output_dir> [num_cam_frames]
+The default smoke prefix is 50 stereo pairs; use 200 for the extended run.
+Every available initial IMU sample is retained, through the first sample at or
+beyond 50 ms after the final camera. Measurement timestamps stay unmodified.
 """
 
+import argparse
+import bisect
 import csv
-import os
-import sys
+import hashlib
+import json
+import math
+from pathlib import Path
+
+TAIL_NS = 50_000_000
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def rows(path, width):
+    result = []
+    with path.open(newline="") as source:
+        for line, row in enumerate(csv.reader(source), 1):
+            if not row or row[0].strip().startswith("#"):
+                continue
+            if len(row) != width:
+                raise ValueError(f"{path}:{line}: expected {width} columns")
+            timestamp = int(row[0])
+            if timestamp < 0 or (result and timestamp <= result[-1][0]):
+                raise ValueError(f"{path}:{line}: timestamps must be positive and strictly increasing")
+            result.append((timestamp, *[value.strip() for value in row[1:]]))
+    if not result:
+        raise ValueError(f"{path}: no samples")
+    return result
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_byte_array(output, data):
+    for offset in range(0, len(data), 32):
+        output.write("    " + ",".join(f"0x{value:02x}" for value in data[offset:offset + 32]) + ",\n")
+
+
+def generate(mav0, output, frame_count):
+    if frame_count <= 0:
+        raise ValueError("num_cam_frames must be positive")
+    cameras = [rows(mav0 / name / "data.csv", 2) for name in ("cam0", "cam1")]
+    if any(len(camera) < frame_count for camera in cameras):
+        raise ValueError(f"dataset contains fewer than {frame_count} stereo pairs")
+    cameras = [camera[:frame_count] for camera in cameras]
+    for index, (left, right) in enumerate(zip(*cameras)):
+        if left[0] != right[0]:
+            raise ValueError(f"stereo timestamp mismatch at pair {index}: {left[0]} != {right[0]}")
+
+    all_imu = rows(mav0 / "imu0" / "data.csv", 7)
+    required_end = cameras[0][-1][0] + TAIL_NS
+    end_index = bisect.bisect_left([sample[0] for sample in all_imu], required_end)
+    if end_index == len(all_imu):
+        raise ValueError("IMU input does not cover the final camera plus its 50 ms tail")
+    imu = [(sample[0], *map(float, sample[1:])) for sample in all_imu[:end_index + 1]]
+    if any(not math.isfinite(value) for sample in imu for value in sample[1:]):
+        raise ValueError("IMU input contains a nonfinite measurement")
+    if imu[0][0] > cameras[0][0][0]:
+        raise ValueError("IMU input must begin at or before the first camera")
+
+    files = {}
+    for sensor in ("cam0", "cam1", "imu0"):
+        relative = f"{sensor}/data.csv"
+        files[relative] = {"sha256": sha256(mav0 / relative), "bytes": (mav0 / relative).stat().st_size}
+    images = []
+    for index, pair in enumerate(zip(*cameras)):
+        record = []
+        for sensor, (timestamp, filename) in enumerate(pair):
+            # Filenames are CSV basenames, never filesystem paths.
+            if not filename or Path(filename).name != filename:
+                raise ValueError(f"invalid image filename: {filename!r}")
+            relative = f"cam{sensor}/data/{filename}"
+            path = mav0 / relative
+            with path.open("rb") as source:
+                if source.read(8) != PNG_SIGNATURE:
+                    raise ValueError(f"{path}: expected a PNG image")
+            files[relative] = {"sha256": sha256(path), "bytes": path.stat().st_size}
+            record.append((path, path.stat().st_size))
+        images.append(record)
+
+    manifest = {
+        "format_version": 1,
+        "camera_pairs": frame_count,
+        "imu_samples": len(imu),
+        "dataset_origin_ns": min(imu[0][0], cameras[0][0][0]),
+        "dataset_end_ns": max(imu[-1][0], cameras[0][-1][0]),
+        "first_imu_ns": imu[0][0], "last_imu_ns": imu[-1][0],
+        "first_camera_ns": cameras[0][0][0], "last_camera_ns": cameras[0][-1][0],
+        "imu_tail_ns": TAIL_NS,
+        "embedded_png_bytes": sum(size for pair in images for path, size in pair),
+        "files": files,
+    }
+    digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    manifest["selection_sha256"] = digest
+    output.mkdir(parents=True, exist_ok=True)
+    prefix = "#pragma once\n#include <cstdint>\n#include <cstddef>\n\n"
+    with (output / "embedded_dataset.hpp").open("w") as dest:
+        dest.write(prefix)
+        for name, value in (
+            ("Origin", manifest["dataset_origin_ns"]),
+            ("End", manifest["dataset_end_ns"]),
+        ):
+            dest.write(f"static constexpr int64_t kEmbeddedDataset{name}Ns = {value}LL;\n")
+        for name, value in (
+            ("FirstImu", imu[0][0]), ("LastImu", imu[-1][0]),
+            ("FirstCam", cameras[0][0][0]), ("LastCam", cameras[0][-1][0]),
+        ):
+            dest.write(f"static constexpr int64_t kEmbedded{name}Ns = {value}LL;\n")
+        dest.write(f"static constexpr size_t kEmbeddedDatasetImuCount = {len(imu)};\n")
+        dest.write(f"static constexpr size_t kEmbeddedDatasetCamCount = {frame_count};\n")
+        dest.write(f'static constexpr char kEmbeddedDatasetSha256[] = "{digest}";\n')
+
+    with (output / "embedded_imu.hpp").open("w") as dest:
+        dest.write(prefix)
+        dest.write(f"static constexpr size_t kEmbeddedImuCount = {len(imu)};\n")
+        dest.write("struct EmbeddedImuSample { int64_t ts_ns; double wx, wy, wz, ax, ay, az; };\n")
+        dest.write("static const EmbeddedImuSample kEmbeddedImu[] = {\n")
+        for timestamp, *values in imu:
+            dest.write("    {" + str(timestamp) + "LL, " + ", ".join(f"{value:.17e}" for value in values) + "},\n")
+        dest.write("};\n")
+
+    with (output / "embedded_cam.hpp").open("w") as dest:
+        dest.write(prefix)
+        dest.write(f"static constexpr size_t kEmbeddedCamCount = {frame_count};\n")
+        for index, pair in enumerate(images):
+            for sensor, (path, size) in enumerate(pair):
+                dest.write(f"static const uint8_t kCam{sensor}Frame{index}[] = {{\n")
+                write_byte_array(dest, path.read_bytes())
+                dest.write("};\n")
+        dest.write("struct EmbeddedCamFrame {\n")
+        dest.write("    int64_t ts_ns;\n    const uint8_t* cam0_png;\n    size_t cam0_size;\n")
+        dest.write("    const uint8_t* cam1_png;\n    size_t cam1_size;\n};\n")
+        dest.write("static const EmbeddedCamFrame kEmbeddedCam[] = {\n")
+        for index, pair in enumerate(images):
+            dest.write(f"    {{{cameras[0][index][0]}LL, kCam0Frame{index}, {pair[0][1]}, "
+                       f"kCam1Frame{index}, {pair[1][1]}}},\n")
+        dest.write("};\n")
+    (output / "dataset_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    print(f"Embedded {frame_count} stereo pairs, {len(imu)} IMUs, "
+          f"{manifest['embedded_png_bytes'] / 1024**2:.1f} MiB PNG data; SHA256 {digest}")
+    return manifest
+
 
 def main():
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <mav0_dir> <output_dir> [num_frames]")
-        sys.exit(1)
-
-    mav0_dir = sys.argv[1]
-    out_dir = sys.argv[2]
-    num_frames = int(sys.argv[3]) if len(sys.argv) > 3 else 50
-
-    os.makedirs(out_dir, exist_ok=True)
-
-    # ── Read camera CSV (cam0) to get timestamps + filenames ──────────
-    cam0_csv = os.path.join(mav0_dir, "cam0", "data.csv")
-    cam1_csv = os.path.join(mav0_dir, "cam1", "data.csv")
-
-    cam0_entries = []
-    with open(cam0_csv, "r") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row[0].startswith("#"):
-                continue
-            ts_ns = int(row[0])
-            filename = row[1].strip()
-            cam0_entries.append((ts_ns, filename))
-
-    cam1_entries = []
-    with open(cam1_csv, "r") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row[0].startswith("#"):
-                continue
-            ts_ns = int(row[0])
-            filename = row[1].strip()
-            cam1_entries.append((ts_ns, filename))
-
-    # Use first num_frames
-    cam0_entries = cam0_entries[:num_frames]
-    cam1_entries = cam1_entries[:num_frames]
-
-    # ── Read IMU CSV ──────────────────────────────────────────────────
-    imu_csv = os.path.join(mav0_dir, "imu0", "data.csv")
-    imu_entries = []
-    with open(imu_csv, "r") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row[0].startswith("#"):
-                continue
-            ts_ns = int(row[0])
-            wx, wy, wz = float(row[1]), float(row[2]), float(row[3])
-            ax, ay, az = float(row[4]), float(row[5]), float(row[6])
-            imu_entries.append((ts_ns, wx, wy, wz, ax, ay, az))
-
-    # Only keep IMU samples up to the last camera timestamp
-    last_cam_ts = max(cam0_entries[-1][0], cam1_entries[-1][0])
-    # Also include some IMU samples before the first camera frame
-    first_cam_ts = min(cam0_entries[0][0], cam1_entries[0][0])
-    imu_entries = [e for e in imu_entries if e[0] <= last_cam_ts + 50000000]
-
-    print(f"Embedding {len(cam0_entries)} cam0 frames, {len(cam1_entries)} cam1 frames, {len(imu_entries)} IMU samples")
-
-    # ── Generate embedded_imu.hpp ─────────────────────────────────────
-    with open(os.path.join(out_dir, "embedded_imu.hpp"), "w") as f:
-        f.write("#pragma once\n")
-        f.write("#include <cstdint>\n")
-        f.write("#include <cstddef>\n\n")
-        f.write(f"static constexpr size_t kEmbeddedImuCount = {len(imu_entries)};\n\n")
-        f.write("struct EmbeddedImuSample {\n")
-        f.write("    int64_t ts_ns;\n")
-        f.write("    double wx, wy, wz;  // rad/s\n")
-        f.write("    double ax, ay, az;  // m/s^2\n")
-        f.write("};\n\n")
-        f.write("static const EmbeddedImuSample kEmbeddedImu[] = {\n")
-        for ts, wx, wy, wz, ax, ay, az in imu_entries:
-            f.write(f"    {{{ts}LL, {wx:.17e}, {wy:.17e}, {wz:.17e}, {ax:.17e}, {ay:.17e}, {az:.17e}}},\n")
-        f.write("};\n")
-
-    print(f"  Wrote embedded_imu.hpp ({len(imu_entries)} samples)")
-
-    # ── Generate embedded_cam.hpp ─────────────────────────────────────
-    # Each PNG becomes a uint8_t array. We generate an index table.
-    with open(os.path.join(out_dir, "embedded_cam.hpp"), "w") as f:
-        f.write("#pragma once\n")
-        f.write("#include <cstdint>\n")
-        f.write("#include <cstddef>\n\n")
-        f.write(f"static constexpr size_t kEmbeddedCamCount = {len(cam0_entries)};\n\n")
-
-        # Embed each PNG as a byte array
-        total_bytes = 0
-        for i, ((ts0, fn0), (ts1, fn1)) in enumerate(zip(cam0_entries, cam1_entries)):
-            # cam0
-            png0_path = os.path.join(mav0_dir, "cam0", "data", fn0)
-            with open(png0_path, "rb") as pf:
-                data0 = pf.read()
-            f.write(f"// cam0 frame {i}: {fn0} ({len(data0)} bytes)\n")
-            f.write(f"static const uint8_t kCam0Frame{i}[] = {{\n")
-            write_byte_array(f, data0)
-            f.write(f"}};\n\n")
-
-            # cam1
-            png1_path = os.path.join(mav0_dir, "cam1", "data", fn1)
-            with open(png1_path, "rb") as pf:
-                data1 = pf.read()
-            f.write(f"// cam1 frame {i}: {fn1} ({len(data1)} bytes)\n")
-            f.write(f"static const uint8_t kCam1Frame{i}[] = {{\n")
-            write_byte_array(f, data1)
-            f.write(f"}};\n\n")
-
-            total_bytes += len(data0) + len(data1)
-
-        # Index table
-        f.write("struct EmbeddedCamFrame {\n")
-        f.write("    int64_t ts_ns;\n")
-        f.write("    const uint8_t* cam0_png;\n")
-        f.write("    size_t cam0_size;\n")
-        f.write("    const uint8_t* cam1_png;\n")
-        f.write("    size_t cam1_size;\n")
-        f.write("};\n\n")
-
-        f.write("static const EmbeddedCamFrame kEmbeddedCam[] = {\n")
-        for i, ((ts0, fn0), (ts1, fn1)) in enumerate(zip(cam0_entries, cam1_entries)):
-            png0_path = os.path.join(mav0_dir, "cam0", "data", fn0)
-            png1_path = os.path.join(mav0_dir, "cam1", "data", fn1)
-            sz0 = os.path.getsize(png0_path)
-            sz1 = os.path.getsize(png1_path)
-            f.write(f"    {{{ts0}LL, kCam0Frame{i}, {sz0}, kCam1Frame{i}, {sz1}}},\n")
-        f.write("};\n")
-
-    print(f"  Wrote embedded_cam.hpp ({len(cam0_entries)} stereo pairs, {total_bytes / 1024 / 1024:.1f} MB)")
-
-
-def write_byte_array(f, data, cols=16):
-    """Write bytes as hex literals, 16 per line."""
-    for i, b in enumerate(data):
-        if i % cols == 0:
-            f.write("    ")
-        f.write(f"0x{b:02x},")
-        if i % cols == cols - 1:
-            f.write("\n")
-    if len(data) % cols != 0:
-        f.write("\n")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mav0_dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("num_cam_frames", type=int, nargs="?", default=50)
+    args = parser.parse_args()
+    try:
+        generate(args.mav0_dir, args.output_dir, args.num_cam_frames)
+    except (ValueError, OSError) as error:
+        parser.exit(1, f"Dataset generation failed: {error}\n")
 
 
 if __name__ == "__main__":

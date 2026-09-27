@@ -1,0 +1,15 @@
+/* Spike -p1 -m256; shared 10 MHz CLINT. */
+&{/cpus} {
+  timebase-frequency = <10000000>;
+  cpu@1 { status = "disabled"; };
+  cpu@2 { status = "disabled"; };
+  cpu@3 { status = "disabled"; };
+  cpu@4 { status = "disabled"; };
+  cpu@5 { status = "disabled"; };
+  cpu@6 { status = "disabled"; };
+  cpu@7 { status = "disabled"; };
+};
+&ram0 { reg = <0x80000000 0x10000000>; };
+&mtimer { interrupts-extended = <&hlic0 7>; };
+&clint { interrupts-extended = <&hlic0 3 &hlic0 7>; };
+&plic { interrupts-extended = <&hlic0 11 &hlic0 9>; };

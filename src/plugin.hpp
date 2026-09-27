@@ -9,13 +9,13 @@ namespace ILLIXR {
 /**
  * Active Object Plugin base:
  * - Owns a Node.
- * - Derived class MUST create its own Zephyr thread in start().
+ * - Worker plugins create a Zephyr thread; service plugins register without one.
  */
 class Plugin {
 public:
     Plugin(phonebook_new& pb, const char* name)
         : node_{}
-        , should_stop_{false} {
+        , should_stop_{} {
         // 1. Initialize Node's internal state
         node_.initialize(pb, name);
 
@@ -36,7 +36,7 @@ public:
      * Stop the plugin worker thread (optional).
      */
     virtual void stop() {
-        should_stop_ = true;
+        atomic_set(&should_stop_, 1);
     }
 
     // Access to the underlying Node
@@ -45,7 +45,7 @@ public:
 
 protected:
     Node node_;
-    volatile bool should_stop_;
+    atomic_t should_stop_;
 
     /**
      * Helper for the threaded loop.
@@ -54,7 +54,7 @@ protected:
      * @param sleep_ms - The cycle tick rate (prevents CPU starvation).
      */
     void run_loop(uint32_t sleep_ms = 10) {
-        while (!should_stop_) {
+        while (!atomic_get(&should_stop_)) {
             // 1. Check and fire any periodic jobs registered in the Node
             node_.service_periodic();
 

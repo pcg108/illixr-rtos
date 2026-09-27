@@ -98,7 +98,6 @@ set(KERNEL_ELF_NAME zephyr.elf CACHE INTERNAL "" FORCE)
 # zephyr
 target_sources(app PRIVATE
   src/main.cpp
-  src/atomic_shim.c
 )
 
 target_link_libraries(app PRIVATE

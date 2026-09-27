@@ -1,0 +1,13 @@
+#include "rocket_common.overlay"
+
+&{/cpus} {
+  cpu@2 { status = "disabled"; };
+  cpu@3 { status = "disabled"; };
+  cpu@4 { status = "disabled"; };
+  cpu@5 { status = "disabled"; };
+  cpu@6 { status = "disabled"; };
+  cpu@7 { status = "disabled"; };
+};
+&mtimer { interrupts-extended = <&hlic0 7 &hlic1 7>; };
+&clint { interrupts-extended = <&hlic0 3 &hlic0 7 &hlic1 3 &hlic1 7>; };
+&plic { interrupts-extended = <&hlic0 11 &hlic0 9 &hlic1 11 &hlic1 9>; };

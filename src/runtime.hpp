@@ -1,76 +1,49 @@
-#ifndef ILLIXR_RUNTIME_HPP
-#define ILLIXR_RUNTIME_HPP
-
-#include <zephyr/kernel.h>
-#include <stdio.h>
-#include <stdint.h>
+#pragma once
+#include "embedded_dataset.hpp"
 #include "phonebook_new.hpp"
 #include "plugin_registry.hpp"
-#include "stoplight.hpp"   // extern declarations only — definitions are in stoplight.cpp
-
-// Defined in main.cpp; recorded here at the moment data flow begins.
-extern uint64_t g_program_start_mtime;
-
-// CLINT mtime: global real-time counter shared across all harts.
-// Address 0x200bff8 from the spike DTS. Safe to compare across CPUs.
-static inline uint64_t read_mtime_runtime() {
-    volatile uint64_t* mtime = reinterpret_cast<volatile uint64_t*>(0x200bff8UL);
-    return *mtime;
-}
+#include "threadloop.hpp"
 
 namespace ILLIXR {
-
 class Runtime {
-public:
-    explicit Runtime(phonebook_new& pb) : pb_(pb) {}
-
-    void initialize(const char* data_path, const char* demo_path) {
-        printf("[runtime] Initialize called.\n");
-        printf("[runtime]   Data Path: %s\n", data_path ? data_path : "NULL");
-        printf("[runtime]   Demo Path: %s\n", demo_path ? demo_path : "NULL");
-    }
-
+  public:
+    explicit Runtime(phonebook_new &pb) : pb_{pb} {}
+    void initialize(const char *, const char *) {}
     void start_all_plugins() {
-        printf("[runtime] Starting all plugins...\n");
-        printf("[runtime] Thread: %p\n", k_current_get());
-
-        PluginRegistry& reg = get_plugin_registry();
-
-        // ── Step 1: spawn all plugin threads ─────────────────────────────
-        // Order doesn't matter — we wait for all of them below before
-        // any data starts flowing.
-        for (const auto& entry : reg) {
-            printf("[runtime] Launching plugin: %s\n", entry.name);
+        const auto &reg = get_plugin_registry();
+        for (const auto &entry : reg)
             entry.start_fn(pb_);
+        // Service plugins register no thread and do not participate in the
+        // worker rendezvous (e.g. on-demand pose prediction).
+        const auto worker_count = threadloop::worker_count;
+        for (size_t i = 0; i < worker_count; ++i) {
+            while (k_sem_take(&stoplight_ready, K_MSEC(10)) != 0) {
+                if (replay::failed())
+                    break;
+            }
+            if (replay::failed())
+                break;
         }
-
-        // ── Step 2: wait for every thread to finish _p_thread_setup() ────
-        // Each plugin's threadloop::run() gives stoplight_ready once after
-        // _p_thread_setup() returns — meaning all subscriptions are registered.
-        // We take reg.size() times so we know every plugin is fully ready
-        // before any data starts flowing.
-        printf("[runtime] Waiting for %zu plugins to finish setup...\n",
-               reg.size());
-        for (size_t i = 0; i < reg.size(); i++) {
-            k_sem_take(&stoplight_ready, K_FOREVER);
-            printf("[runtime] %zu/%zu plugins ready\n", i + 1, reg.size());
-        }
-
-        g_program_start_mtime = read_mtime_runtime();
-        printf("[runtime] All %zu plugins ready — data flow begins.\n",
-               reg.size());
-        printf("[runtime] Timing start: mtime=%llu ticks\n",
-               (unsigned long long)g_program_start_mtime);
+        auto &clock = get_global_relative_clock();
+        clock.set_dataset_origin(kEmbeddedDatasetOriginNs);
+        clock.start();
+        for (size_t i = 0; i < worker_count; ++i)
+            k_sem_give(&stoplight_start);
     }
-
+    bool finished() const {
+        for (size_t i = 0; i < threadloop::worker_count; ++i)
+            if (!threadloop::workers[i]->done())
+                return false;
+        return true;
+    }
     void shutdown() {
-        printf("[runtime] Shutting down...\n");
+        for (size_t i = 0; i < threadloop::worker_count; ++i)
+            threadloop::workers[i]->stop();
+        for (size_t i = 0; i < threadloop::worker_count; ++i)
+            threadloop::workers[i]->join();
     }
 
-private:
-    phonebook_new& pb_;
+  private:
+    phonebook_new &pb_;
 };
-
 } // namespace ILLIXR
-
-#endif // ILLIXR_RUNTIME_HPP
