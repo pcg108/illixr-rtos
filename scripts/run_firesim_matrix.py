@@ -57,6 +57,19 @@ def normalize_uart(raw):
     return ANSI.sub('', text).replace('\r\n', '\n').replace('\r', '\n')
 
 
+def firmware_clock_settings(elf):
+    """Read explicit build settings; legacy manifests retain their old defaults.
+
+    Case construction can precede a build. Validation at execution still checks
+    the manifest and compiled configuration against these requested settings.
+    """
+    path = Path(elf).parent / 'build_manifest.json'
+    if not path.exists():
+        return {}
+    target = json.loads(path.read_text())['target']
+    return {key: target[key] for key in ('modeled_clock_scale', 'ticks_per_sec') if key in target}
+
+
 def cases_for(work, artifacts):
     cases = []
     for harts, mode in MODES.items():
@@ -73,7 +86,21 @@ def cases_for(work, artifacts):
                 'timeout_seconds': WATCHDOG, 'max_cycles': MAX_CYCLES,
                 'memory_profile_interval_cycles': MEMORY_PROFILE_INTERVAL,
                 'zero_out_dram': ZERO_OUT_DRAM})
+    for case in cases:
+        case.update(firmware_clock_settings(case['elf']))
     return cases
+
+
+def effective_clocks(case, hardware):
+    """Keep verified hardware identity separate from explicit target-time scaling.
+
+    Scaling both frequencies preserves the measured cycle/mtime ratio. This is
+    an operating-point experiment, not evidence of silicon timing at 1 GHz.
+    """
+    scale = case.get('modeled_clock_scale', 1)
+    if type(scale) is not int or scale not in (1, 2):
+        raise ValueError('Modeled clock scale must be explicitly 1 or 2')
+    return {key: hardware[key] * scale for key in ('timer_hz', 'core_hz')}
 
 
 def validate_firmware(case, hardware=None):
@@ -88,8 +115,30 @@ def validate_firmware(case, hardware=None):
     for name in ('zephyr.elf', '.config', 'zephyr.dts', 'dataset_manifest.json'):
         if build['artifact_sha256'].get(name) != sha256(elf.parent / name):
             raise ValueError(f'Immutable firmware artifact differs from its build manifest: {name}')
-    if hardware and target['timer_hz'] != hardware['timer_hz']:
-        raise ValueError('Firmware timer frequency differs from verified FireSim hardware')
+    scale = case.get('modeled_clock_scale', 1)
+    if type(scale) is not int or scale not in (1, 2) or target.get('modeled_clock_scale', 1) != scale:
+        raise ValueError('Firmware and case must agree on the explicit modeled clock scale')
+    if hardware:
+        clocks = effective_clocks(case, hardware)
+        if target['timer_hz'] != clocks['timer_hz']:
+            raise ValueError('Firmware timer frequency differs from verified FireSim hardware clock model')
+        if scale != 1:
+            if (target.get('core_hz') != clocks['core_hz'] or
+                    any(target.get('generated_' + key) != hardware[key] for key in clocks)):
+                raise ValueError('Scaled firmware must preserve the generated hardware clock provenance')
+            for name in ('CMakeCache.txt',):
+                if build['artifact_sha256'].get(name) != sha256(elf.parent / name):
+                    raise ValueError('Scaled firmware clock configuration hash mismatch')
+            config = (elf.parent / '.config').read_text().splitlines()
+            cache = (elf.parent / 'CMakeCache.txt').read_text().splitlines()
+            if (f"CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC={clocks['timer_hz']}" not in config or
+                    not any(re.fullmatch(r'ILLIXR_CORE_HZ:[^=]+=' + str(clocks['core_hz']), line) for line in cache)):
+                raise ValueError('Scaled firmware compiled clocks differ from its declared clock model')
+    if 'ticks_per_sec' in case:
+        if (target.get('ticks_per_sec') != case['ticks_per_sec'] or
+                f"CONFIG_SYS_CLOCK_TICKS_PER_SEC={case['ticks_per_sec']}" not in
+                (elf.parent / '.config').read_text().splitlines()):
+            raise ValueError('Firmware timeout tick rate differs from the experiment')
     if not case['platform_check']:
         dataset = json.loads((elf.parent / 'dataset_manifest.json').read_text())
         if dataset.get('camera_pairs') != 50 or dataset.get('imu_samples') != 501:
@@ -263,7 +312,8 @@ def fingerprints(case):
     path = Path(case['hardware_manifest'])
     hardware = validate_hardware(path, case['harts'])
     validate_firmware(case, hardware)
-    return {'elf_sha256': sha256(case['elf']), 'hardware_manifest_sha256': sha256(path),
+    return {**{key: case[key] for key in ('modeled_clock_scale', 'ticks_per_sec') if key in case},
+            'elf_sha256': sha256(case['elf']), 'hardware_manifest_sha256': sha256(path),
             'memory_profile_interval_cycles': case['memory_profile_interval_cycles'],
             'zero_out_dram': case['zero_out_dram'],
             **{key + '_sha256': hardware[key + '_sha256'] for key in ('bitstream', 'driver', 'driver_tar')}}
@@ -564,6 +614,7 @@ def collect_memory_stats(directory, profile_interval):
 
 
 def analyze_case(case, hardware, directory, execution, args):
+    clocks = effective_clocks(case, hardware)
     uart = directory / 'runfarm/sim_slot_0/uartlog'
     raw = uart.read_bytes() if uart.is_file() else b''
     (directory / 'uartlog.raw').write_bytes(raw)
@@ -577,7 +628,7 @@ def analyze_case(case, hardware, directory, execution, args):
     data = records(log)
     if case['platform_check']:
         result = {'clock': data['clocks'], 'platform': data['platforms'], 'errors': startup_checks(
-            data, case['harts'], hardware['timer_hz'], hardware['core_hz'], True)}
+            data, case['harts'], clocks['timer_hz'], clocks['core_hz'], True)}
     else:
         if len(data['summaries']) == 1 and not extra_errors:
             native_log = directory / 'native.log'
@@ -596,7 +647,7 @@ def analyze_case(case, hardware, directory, execution, args):
             extra_errors.append('Complete successful execution is required before native replay')
         result = analyze(log, native=native_log, harts=case['harts'], require_initialized=True,
             require_async=True, dataset=args.dataset, placement=case['placement'], require_platform=True,
-            expected_timer_hz=hardware['timer_hz'], expected_core_hz=hardware['core_hz'], require_gpu=case.get('require_gpu', False))
+            expected_timer_hz=clocks['timer_hz'], expected_core_hz=clocks['core_hz'], require_gpu=case.get('require_gpu', False))
         if case.get('require_gpu'):
             if not getattr(args, 'prediction_native', None):
                 extra_errors.append('GPU pipeline requires the independent prediction/transform reference executable')
@@ -621,7 +672,9 @@ def analyze_case(case, hardware, directory, execution, args):
     if len(cycle_matches) == 1:
         result['firesim_target_cycles'] = int(cycle_matches[0])
     result.update(host_elapsed_seconds=execution['host_elapsed_seconds'], hardware_config=hardware['config'],
-                  memory_stats=memory_stats)
+                  memory_stats=memory_stats, clock_model={'scale': case.get('modeled_clock_scale', 1),
+                    'effective': clocks, 'generated': {key: hardware[key] for key in clocks},
+                    'ticks_per_sec': case.get('ticks_per_sec')})
     return result
 
 

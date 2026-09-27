@@ -57,6 +57,8 @@ def main():
     parser.add_argument("--platform", type=Path)
     parser.add_argument("--placement", choices=("scheduler", "pinned"))
     parser.add_argument("--preflight", type=int, choices=(0, 1))
+    parser.add_argument("--modeled-clock-scale", type=int, choices=(1, 2), default=1,
+                        help="Explicit simulation time reinterpretation; generated hardware remains unchanged")
     args = parser.parse_args()
     if args.validate_platform:
         validate_platform(args.validate_platform, args.harts)
@@ -74,7 +76,7 @@ def main():
     config = dict(line.split("=", 1) for line in (args.artifact / ".config").read_text().splitlines()
                   if line.startswith("CONFIG_") and "=" in line)
     for key, value in {"CONFIG_MP_MAX_NUM_CPUS": str(args.harts),
-                       "CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC": "500000",
+                       "CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC": str(platform['timer_hz'] * args.modeled_clock_scale),
                        "CONFIG_FPU": "y", "CONFIG_FPU_SHARING": "y", "CONFIG_UART_HTIF": "y"}.items():
         if config.get(key) != value:
             raise ValueError(f"Firmware {key}: expected {value}, got {config.get(key)}")
@@ -88,8 +90,8 @@ def main():
         raise ValueError("Firmware placement differs from the requested artifact placement")
     if (cache["ILLIXR_PLATFORM_CHECK_ONLY"].upper() in true_values) != bool(args.preflight):
         raise ValueError("Firmware preflight mode differs from the requested artifact mode")
-    if int(cache["ILLIXR_CORE_HZ"]) != platform["core_hz"]:
-        raise ValueError("Firmware core frequency differs from the generated hardware")
+    if int(cache["ILLIXR_CORE_HZ"]) != platform["core_hz"] * args.modeled_clock_scale:
+        raise ValueError("Firmware core frequency differs from the declared clock model")
     expected_replay = {"ILLIXR_DATASET_FRAMES": "50", "ILLIXR_CAM_QUEUE_CAPACITY": "8",
                        "ILLIXR_IMU_QUEUE_CAPACITY": "4096", "ILLIXR_VIO_DELAY_MS": "0",
                        "ILLIXR_VIO_DELAY_AFTER_CAM": "1"}
@@ -107,7 +109,12 @@ def main():
     manifest = json.loads(manifest_path.read_text())
     manifest["target"] = {"platform": "chipyard-rocket", "harts": args.harts,
                           "placement": args.placement, "platform_check_only": bool(args.preflight),
-                          "timer_hz": platform["timer_hz"],
+                          "timer_hz": platform["timer_hz"] * args.modeled_clock_scale,
+                          "core_hz": platform["core_hz"] * args.modeled_clock_scale,
+                          "ticks_per_sec": int(config["CONFIG_SYS_CLOCK_TICKS_PER_SEC"]),
+                          "modeled_clock_scale": args.modeled_clock_scale,
+                          "generated_timer_hz": platform["timer_hz"],
+                          "generated_core_hz": platform["core_hz"],
                           "hardware_dts_sha256": sha(args.artifact / "hardware.dts")}
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 

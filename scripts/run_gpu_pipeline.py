@@ -50,11 +50,14 @@ def firesim_cases(work, hardware_work, preflight):
             'hardware_manifest': str(hardware_work / 'control/hardware-4.json'),
             'timeout_seconds': firesim.WATCHDOG, 'max_cycles': firesim.MAX_CYCLES,
             'memory_profile_interval_cycles': firesim.MEMORY_PROFILE_INTERVAL, 'zero_out_dram': True}
-    return [{**base, 'name': 'gpu-firesim-quad-preflight', 'platform_check': True,
+    cases = [{**base, 'name': 'gpu-firesim-quad-preflight', 'platform_check': True,
              'elf': str(preflight), 'output': str(work / 'results' / f'{namespace}-firesim-quad-preflight-1')},
             {**base, 'name': 'gpu-firesim-quad-scheduler-50', 'platform_check': False, 'require_gpu': True,
              'elf': str(work / 'artifacts/rocket-quad-scheduler-50/zephyr.elf'),
              'output': str(work / 'results' / f'{namespace}-firesim-quad-scheduler-1')}]
+    for case in cases:
+        case.update(firesim.firmware_clock_settings(case['elf']))
+    return cases
 
 
 def check_latches(hardware_work):
@@ -117,8 +120,9 @@ def report_metrics(row):
         'spike' if row['name'].startswith('gpu-spike-') else 'firesim-u250')
     measured = [item for item in analysis.get('platform', [])
                 if item.get('status') in ('ok', 'pass', 'passed', 'success') and item.get('ratio_checked') is True]
-    core_hz = 500_000_000 if (backend == 'firesim-u250' and
-                            any(item.get('core_hz') == 500_000_000 for item in measured)) else None
+    frequencies = {item.get('core_hz') for item in measured}
+    core_hz = next(iter(frequencies)) if (backend == 'firesim-u250' and len(frequencies) == 1
+                                        and frequencies <= {500_000_000, 1_000_000_000}) else None
     application_cycles = (runtime_ns * core_hz // 1_000_000_000
                           if core_hz and isinstance(runtime_ns, int) and runtime_ns > 0 else None)
     camera_count = summary.get('cam_processed')
@@ -126,6 +130,9 @@ def report_metrics(row):
             'shared_timer_hz': analysis.get('clock', [{}])[0].get('timer_hz') if analysis.get('clock') else None,
             'host_seconds': metadata.get('host_elapsed_seconds', analysis.get('host_elapsed_seconds')),
             'verified_core_hz': core_hz, 'application_elapsed_cycles': application_cycles,
+            'trace_export_seconds': summary.get('trace_export_ns', 0) / 1e9 if 'trace_export_ns' in summary else None,
+            'trace_export_target_cycles': summary['trace_export_ns'] * core_hz // 1_000_000_000
+                if core_hz and 'trace_export_ns' in summary else None,
             'firesim_total_target_cycles': analysis.get('firesim_target_cycles') if backend == 'firesim-u250' else None,
             'vio_camera_pairs_per_target_second': camera_count / target_seconds
                 if isinstance(camera_count, int) and isinstance(target_seconds, (float, int)) and target_seconds > 0 else None}
@@ -220,7 +227,7 @@ def comparison_markdown(rows, baseline, history=(), htif_directory=None):
                          gpu.get('render_completed'), gpu.get('timewarp_completed'), gpu.get('fresh_warp_completed'),
                          metrics['target_seconds'], metrics['host_seconds']])
         clocks.append([name, metrics['backend'], metrics['shared_timer_hz'], metrics['verified_core_hz'], metrics['application_elapsed_cycles'],
-                       metrics['firesim_total_target_cycles']])
+                       metrics['firesim_total_target_cycles'], metrics['trace_export_seconds'], metrics['trace_export_target_cycles']])
         if not summary:
             continue
         inputs.append([name, summary.get('imu_processed'), summary.get('imu_integrator_processed'),
@@ -269,9 +276,10 @@ def comparison_markdown(rows, baseline, history=(), htif_directory=None):
     text += ('## Clock and cycle accounting\n\n'
              'Application elapsed cycles are derived from replay/drain runtime only when FireSim startup verifies the 500 MHz core clock. '
              'FireSim total target cycles also include startup and final trace output. '
+             'Trace export is measured separately around the bulk trace dump, after worker shutdown; it excludes the final summary lines. '
              'These are elapsed cycles, not summed CPU busy cycles. Spike has no assumed 500 MHz core frequency; '
              'its target seconds come from the configured shared timer, and CPU cycle totals are unavailable here.\n\n')
-    text += report_table(['Case', 'Backend', 'Shared timer Hz', 'Verified core Hz', 'Application elapsed cycles', 'FireSim total target cycles'], clocks)
+    text += report_table(['Case', 'Backend', 'Shared timer Hz', 'Verified core Hz', 'Application elapsed cycles', 'FireSim total target cycles', 'Trace export target seconds', 'Trace export target cycles'], clocks)
     if htif_directory is not None:
         text += ('The preserved live FireSim driver uses `+fesvr-step-size=10000`. HTIF hands off one console character at a time; '
                  'the observed roughly 2.5 KB/s trace-output rate is consistent with host service at 10,000-target-cycle boundaries. '
@@ -303,8 +311,9 @@ def comparison_markdown(rows, baseline, history=(), htif_directory=None):
              'wakeup delay is the excess beyond the scheduled GPU completion instant.\n\n')
     text += report_table(['Case', 'Stage', 'Requested delay (ms)', 'Observed minimum (ms)', 'Observed maximum (ms)',
                           'Maximum wakeup delay (ms)'], latencies)
-    text += ('Timewarp keeps the original frame presentation deadline separate from the later display boundary selected '
-             'when starting late. Retargeting cannot hide a missed original deadline. Deadline misses are performance observations, '
+    text += ('Legacy v1 separates the original render-frame deadline from a retargeted warp deadline. '
+             'V2 gives every warp its own scheduled vsync and never retargets; both deadline columns refer to that original warp deadline. '
+             'V2 misses use publication time, with GPU completion lateness also retained in analysis. Deadline misses are performance observations, '
              'separate from functional correctness.\n\n')
     text += report_table(['Case', 'Stage', 'Original presentation misses', 'Selected target misses', 'Retargeted frames',
                           'Retargeted frames missing new target', 'Maximum original lateness (ms)', 'Maximum selected-target lateness (ms)'], deadlines)
@@ -441,7 +450,7 @@ def main():
     parser.add_argument('--include-slow-render', action='store_true',
                         help='Include two-period dual-core render case and require fresh reuse before FireSim')
     parser.add_argument('--firesim-work', type=Path, default=DEFAULT_FIRESIM)
-    parser.add_argument('--preflight', type=Path, default=Path('/home/prashanth/illixr-rocket-work/artifacts/rocket-quad-preflight/zephyr.elf'))
+    parser.add_argument('--preflight', type=Path, help='Matching preflight ELF; defaults to the current work artifacts')
     parser.add_argument('--spike', type=Path, default=Path('/home/prashanth/chipyard/.conda-env/riscv-tools/bin/spike'))
     parser.add_argument('--spike-attempt', type=int, default=1,
                         help='Explicit preserved attempt number for both Spike cases and the FireSim prerequisite gate')
@@ -453,7 +462,8 @@ def main():
     if args.spike_attempt < 1:
         parser.error('--spike-attempt must be positive')
     spike = spike_cases(args.work, args.spike_attempt, args.include_slow_render)
-    fpga = firesim_cases(args.work, args.firesim_work, args.preflight)
+    preflight = args.preflight or args.work / 'artifacts/rocket-quad-preflight/zephyr.elf'
+    fpga = firesim_cases(args.work, args.firesim_work, preflight)
     all_cases = spike + fpga
     firesim.write_json(args.work / 'control/pipeline-cases.json', all_cases)
     if not args.execute or args.stage == 'report':

@@ -82,12 +82,12 @@ inline Frame retained_frame;
 inline bool frame_available{};
 inline atomic_t render_closed{}, timewarp_done{};
 inline int64_t render_closed_ns{}, timewarp_done_ns{};
-inline uint64_t render_submitted{}, render_completed{}, render_skipped_slots{};
+inline uint64_t render_submitted{}, render_completed{}, render_skipped_slots{}, render_next_slot{};
 inline uint64_t timewarp_submitted{}, timewarp_completed{}, distinct_selected{}, repeated_uses{};
 inline uint64_t empty_opportunities{}, missed_opportunities{}, last_selected_frame{};
 inline uint64_t render_deadlines_missed{}, timewarp_deadlines_missed{}, fresh_warp_completed{};
 inline uint64_t new_outputs{}, repeated_outputs{}, no_outputs{}, fresh_on_time_presentations{};
-inline uint64_t trace_overflow{};
+inline atomic_t trace_overflow{};
 inline std::size_t presentation_cursor{};
 inline uint64_t displayed_warp{}, next_display_slot{1};
 inline void initialize() {
@@ -166,7 +166,7 @@ inline void finish_timewarp() {
   }
   k_mutex_unlock(&completion_mutex);
 }
-inline void overflow() { ++trace_overflow; replay::fail("GPU trace capacity exceeded"); }
+inline void overflow() { atomic_add(&trace_overflow, 1); replay::fail("GPU trace capacity exceeded"); }
 inline void record_render(const Frame &frame) {
   ++render_completed;
   render_deadlines_missed += frame.publication_ns > frame.presentation_ns;
@@ -307,7 +307,7 @@ inline void dump() {
   }
   printf("ILLIXR_GPU_RESULT {\"version\":2");
 #define GPU_COUNT(name) printf(",\"" #name "\":%llu", (unsigned long long)name)
-  GPU_COUNT(render_submitted); GPU_COUNT(render_completed); GPU_COUNT(render_skipped_slots);
+  GPU_COUNT(render_submitted); GPU_COUNT(render_completed); GPU_COUNT(render_skipped_slots); GPU_COUNT(render_next_slot);
   GPU_COUNT(timewarp_submitted); GPU_COUNT(timewarp_completed); GPU_COUNT(distinct_selected); GPU_COUNT(repeated_uses);
   GPU_COUNT(empty_opportunities); GPU_COUNT(missed_opportunities);
   GPU_COUNT(render_deadlines_missed); GPU_COUNT(timewarp_deadlines_missed); GPU_COUNT(fresh_warp_completed);
@@ -322,6 +322,7 @@ inline void dump() {
 inline void validate() {
   if (!atomic_get(&render_closed) || !atomic_get(&timewarp_done)) replay::fail("GPU pipeline did not shut down");
   if (render_submitted!=render_completed || timewarp_submitted!=timewarp_completed ||
+      render_next_slot!=render_completed+render_skipped_slots ||
       timewarp_completed!=distinct_selected+repeated_uses || distinct_selected>render_completed ||
       display_trace_size!=new_outputs+repeated_outputs+no_outputs) replay::fail("GPU accounting mismatch");
   if (!fresh_warp_completed || !fresh_on_time_presentations) replay::fail("no fresh on-time modeled presentation");

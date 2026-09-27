@@ -83,6 +83,8 @@ int main() {
   if (!failed() && (value(IMU_PUBLISHED) != value(IMU_VIO) ||
                     value(IMU_PUBLISHED) != value(IMU_INTEGRATOR)))
     fail("IMU end-of-stream count mismatch");
+  const auto &export_clock = get_global_relative_clock();
+  const auto export_start_ns = export_clock.is_started() ? export_clock.now_ns() : 0;
 #if ILLIXR_GPU_PIPELINE
   if (!get_pose_prediction().validate())
     fail("prediction validation failed");
@@ -94,6 +96,7 @@ int main() {
   dump_placement();
   printf("ILLIXR_PROPAGATION {\"max_observed_position_norm_m\":%.17g}\n",
          max_observed_propagated_position_norm);
+  const auto export_end_ns = export_clock.is_started() ? export_clock.now_ns() : 0;
   // Only fixed diagnostic strings enter this JSON. Exceptions are printed
   // separately.
   printf("ILLIXR_DIAGNOSTIC %s\n", failure_reason);
@@ -108,7 +111,7 @@ int main() {
          "deadlines\":%ld,\"trace_overflow\":%ld,\"imu_"
          "vio_highwater\":%ld,\"imu_integrator_highwater\":%ld,\"cam_"
          "highwater\":%ld,\"history_highwater\":%ld,"
-         "\"runtime_ns\":%lld}\n",
+         "\"runtime_ns\":%lld,\"trace_export_start_ns\":%lld,\"trace_export_end_ns\":%lld,\"trace_export_ns\":%lld}\n",
          failed() ? "fail" : "pass", (long long)kEmbeddedDatasetOriginNs,
          online_harts, value(IMU_PUBLISHED), value(IMU_VIO),
          value(IMU_INTEGRATOR), value(CAM_PUBLISHED), value(CAM_VIO),
@@ -118,7 +121,8 @@ int main() {
          value(PROBE_IMU_ADVANCED), value(PROBE_MISSED), value(TRACE_OVERFLOW),
          value(IMU_VIO_HIGHWATER), value(IMU_INT_HIGHWATER),
          value(CAM_HIGHWATER), value(INTEGRATOR_HISTORY_HIGHWATER),
-         (long long)runtime_ns);
+         (long long)runtime_ns, (long long)export_start_ns, (long long)export_end_ns,
+         (long long)(export_end_ns - export_start_ns));
   simulator_exit(failed() ? 1 : 0);
   return 0;
 }

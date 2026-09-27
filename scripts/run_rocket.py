@@ -151,6 +151,13 @@ def run(args):
     hardware_dts = validate_hardware(hardware, simulator, args.harts)
     if not elf.is_file():
         raise ValueError(f"Firmware does not exist: {elf}")
+    # Share firmware/provenance checks with FireSim while retaining the
+    # generated hardware frequencies as immutable platform identity.
+    from run_firesim_matrix import firmware_clock_settings, validate_firmware, effective_clocks
+    clock_case = dict(elf=str(elf), harts=args.harts, placement=args.placement,
+                      platform_check=args.platform_check, **firmware_clock_settings(elf))
+    validate_firmware(clock_case, hardware)
+    clocks = effective_clocks(clock_case, hardware)
     if not args.platform_check and not args.native.is_file():
         raise ValueError(f"Native estimator harness does not exist: {args.native}")
     command = simulator_command(simulator, elf, args.chipyard.resolve(), args.max_cycles)
@@ -184,7 +191,7 @@ def run(args):
         metadata["platform_result_seen"] = len(data["platforms"]) == 1
         if args.platform_check:
             result = {"clock": data["clocks"], "platform": data["platforms"], "errors": startup_checks(
-                data, args.harts, hardware["timer_hz"], hardware["core_hz"], True)}
+                data, args.harts, clocks["timer_hz"], clocks["core_hz"], True)}
         else:
             if metadata["final_result_seen"] and not extra_errors:
                 native_log = directory / "native.log"
@@ -204,8 +211,8 @@ def run(args):
             else:
                 extra_errors.append("Complete successful target execution is required before native replay")
             result = analyze(log, native=native_log, harts=args.harts, require_initialized=True, require_async=True,
-                dataset=args.dataset, placement=args.placement, expected_timer_hz=hardware["timer_hz"],
-                expected_core_hz=hardware["core_hz"], require_platform=True)
+                dataset=args.dataset, placement=args.placement, expected_timer_hz=clocks["timer_hz"],
+                expected_core_hz=clocks["core_hz"], require_platform=True)
     except (OSError, ValueError, KeyError, TypeError) as error:
         result = {"errors": [f"Could not validate target evidence: {error}"]}
     result["errors"].extend(extra_errors)

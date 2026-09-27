@@ -101,6 +101,12 @@ int main() {
   atomic_set(&gpu::timewarp_done,1);
   gpu::observe_display_locked(10*P,0);
   assert(gpu::display_trace_size==4 && gpu::display_trace[3].warp_id==2);
+  // No-frame EOS closes the snapshot path immediately: an independently
+  // scheduled final opportunity sees closure even without an image signal.
+  gpu::frame_available=false;
+  gpu::close_render();
+  gpu::Completion empty;
+  assert(!gpu::snapshot_frame(empty) && empty.final);
   // No-frame EOS cannot wait indefinitely and still accounts for startup slots.
   gpu::warp_trace_size=0; gpu::display_trace_size=0; gpu::next_display_slot=1;
   gpu::presentation_cursor=0; gpu::displayed_warp=0; gpu::timewarp_done_ns=P+1;

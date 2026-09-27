@@ -79,12 +79,28 @@ shader cost, or bandwidth. These are configurable workload assumptions, not
 measured GPU performance.
 
 The shared target timer determines elapsed time; host time and instruction
-counts do not drive the workers. Rocket's 500 MHz target frequency translates
-the default delays to approximately 3.47 million and 500,000 target cycles.
-Spike uses its configured timer. Zephyr currently has 1 ms scheduler ticks,
+counts do not drive the workers. The Rocket/FireSim baseline models a 1 GHz CPU
+and declares a 1 MHz timer, preserving the generated hardware's 1000:1 ratio.
+The default delays correspond to approximately 6.94 million and 1 million target cycles.
+The accepted FPGA hardware is unchanged. FASED latency settings remain in cycles.
+Spike retains its configured 10 MHz timer. Zephyr defaults to 10 kHz ticks (100 µs),
 so observed worker wakeups can be later than the scheduled completion instant.
 Both timestamps are retained. Sleeps recheck the clock before recording
 completion, preventing a completion from being reported early.
+
+`build_rocket.sh` selects `config/rocket_1ghz.conf` by default. Set
+`ILLIXR_MODELED_CLOCK_SCALE=1` to build the earlier 500 MHz / 500 kHz model;
+override `CONFIG_SYS_CLOCK_TICKS_PER_SEC` to reproduce the earlier 1 kHz tick.
+Runner cases record clock settings from the firmware manifest and check them
+against compiled settings before execution. Previous artifacts retain their
+original clock interpretation. See [clock experiments](clock-experiments.md).
+
+The final workload summary measures `trace_export_start_ns`, `trace_export_end_ns`,
+and `trace_export_ns` around the bulk console dump after worker shutdown. This
+separates application time from the expensive trace output; the final diagnostic
+and summary lines are outside that measured span. FireSim's total target cycles
+include startup, application work, trace export, and exit. Host wall time also
+includes deployment and simulator overhead.
 
 Frame deadlines and GPU timestamps use elapsed runtime nanoseconds. Prediction
 targets and source IMU timestamps use the dataset epoch, obtained by adding the
@@ -133,7 +149,7 @@ The source copyright and license for the timewarp port are retained in
 GPU trace **version 2** separates `frame_id`, `warp_id`, and `display_slot`.
 `ILLIXR_GPU_EVENT` includes scheduled/actual wake, selection, submission, scheduled
 GPU completion, observed completion and publication times, prediction target,
-frame age/reuse, saved render pose, transform, and processing/publication harts.
+frame age since render publication/reuse, saved render pose, transform, and processing/publication harts.
 `ILLIXR_WARP_SLOT` accounts for submitted, empty, and missed opportunities
 (compact ranges for misses). `ILLIXR_DISPLAY` records eligibility-based output
 selection, observer lateness, and fresh on-time presentation.
@@ -241,3 +257,9 @@ directories and must be passed consistently when checking the FireSim gate.
 The Spike ISA includes `Zicntr`, required by the platform check's `rdcycle`.
 FireSim uses the existing accepted quad-core hardware and preflight firmware,
 checks board availability, and holds the shared runtime lock.
+
+## Validated display-schedule results
+
+See [the completed Spike/FireSim validation](opengl-scheduling-results.md) for frame reuse,
+modeled presentation, deadline misses, actual hart placement, native agreement,
+and separate application/trace-export timing.

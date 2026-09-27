@@ -93,6 +93,38 @@ class FireSimValidation(unittest.TestCase):
         self.assertEqual(len(self.cases), 8)
         workloads = [(c['harts'], c['placement']) for c in self.cases if not c['platform_check']]
         self.assertEqual(workloads, [(1, 'unpinned'), (2, 'unpinned'), (2, 'pinned'), (4, 'unpinned'), (4, 'pinned')])
+
+    def test_clock_scaling_requires_matching_explicit_firmware_and_case(self):
+        case = dict(self.cases[-2], modeled_clock_scale=2, ticks_per_sec=1000)
+        directory = Path(case['elf']).parent
+        manifest = directory / 'build_manifest.json'
+        build = json.loads(manifest.read_text())
+        with self.assertRaisesRegex(ValueError, 'clock scale'):
+            matrix.validate_firmware(case, self.hardware[4])
+        build['target'].update(modeled_clock_scale=2, timer_hz=1_000_000, core_hz=1_000_000_000,
+                               generated_timer_hz=500_000, generated_core_hz=500_000_000,
+                               ticks_per_sec=1000)
+        (directory / '.config').write_text('CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=1000000\nCONFIG_SYS_CLOCK_TICKS_PER_SEC=1000\n')
+        (directory / 'CMakeCache.txt').write_text('ILLIXR_CORE_HZ:STRING=1000000000\n')
+        for name in ('.config', 'CMakeCache.txt'):
+            build['artifact_sha256'][name] = matrix.sha256(directory / name)
+        matrix.write_json(manifest, build)
+        matrix.validate_firmware(case, self.hardware[4])
+        self.assertEqual(matrix.effective_clocks(case, self.hardware[4]),
+                         {'timer_hz': 1_000_000, 'core_hz': 1_000_000_000})
+        with self.assertRaisesRegex(ValueError, 'clock scale'):
+            matrix.validate_firmware(self.cases[-2], self.hardware[4])
+        with self.assertRaisesRegex(ValueError, 'tick rate'):
+            matrix.validate_firmware(dict(case, ticks_per_sec=10000), self.hardware[4])
+        build['target']['generated_core_hz'] = 1_000_000_000
+        matrix.write_json(manifest, build)
+        with self.assertRaisesRegex(ValueError, 'provenance'):
+            matrix.validate_firmware(case, self.hardware[4])
+
+    def test_clock_scaling_rejects_invalid_factors(self):
+        for scale in (True, 0, 3, 2.0, '2'):
+            with self.subTest(scale=scale), self.assertRaises(ValueError):
+                matrix.effective_clocks({'modeled_clock_scale': scale}, self.hardware[4])
         for harts in (1, 2, 4):
             self.assertTrue(next(c for c in self.cases if c['harts'] == harts)['platform_check'])
 

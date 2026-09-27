@@ -100,7 +100,11 @@ def check(data, summary, harts, prediction_checks):
     for e in warps:
         frame=by_frame[e['frame_id']]
         eligible=bisect.bisect_right(render_publications,e['selection_ns'])
-        require(eligible>0 and renders[eligible-1]['frame_id']==e['frame_id'], 'Future frame or non-latest completed frame selected')
+        strictly_before=bisect.bisect_left(render_publications,e['selection_ns'])
+        # CLINT timestamps are quantized. Publications at the exact same timer
+        # tick as selection may linearize on either side of the snapshot lock.
+        possible=renders[max(0,strictly_before-1):eligible]
+        require(any(f['frame_id']==e['frame_id'] for f in possible), 'Future frame or non-latest completed frame selected')
         require(e['actual_wake_ns'] <= e['selection_ns'] <= e['submit_ns'], 'Invalid frame selection time')
         require(e['frame_publication_ns']==frame['publication_ns'] <= e['selection_ns'], 'Future frame selected before publication')
         require(e['frame_age_ns']==e['selection_ns']-frame['publication_ns'], 'Incorrect frame age')
@@ -109,7 +113,7 @@ def check(data, summary, harts, prediction_checks):
                 'Immutable saved render pose or target changed')
         repeated=e['frame_id'] in selected
         require(type(e['reused']) is bool and e['reused']==repeated, 'Incorrect repeated-frame use flag')
-        require(type(e['final']) is bool and e['final']==(e['selection_ns']>=gpu['render_closed_ns']), 'Incorrect final closed-frame selection')
+        require(type(e['final']) is bool and (e['selection_ns']>=gpu['render_closed_ns'] if e['final'] else e['selection_ns']<=gpu['render_closed_ns']), 'Incorrect final closed-frame selection')
         repeats+=repeated; selected.add(e['frame_id'])
         is_fresh=e['prediction_status']=='valid' and frame['prediction_status']=='valid'
         fresh+=is_fresh
@@ -123,6 +127,12 @@ def check(data, summary, harts, prediction_checks):
     if warps:
         require(warps[-1]['final'] and sum(e['final'] for e in warps)==1 and warps[-1]['frame_id']==renders[-1]['frame_id'], 'Final-frame shutdown missing or not unique')
     require(not renders or renders[-1]['slot']+1 <= len(renders)+gpu['render_skipped_slots'], 'Unaccounted render opportunities')
+    if 'render_next_slot' in gpu:
+        require(gpu['render_next_slot']==len(renders)+gpu['render_skipped_slots'], 'Render opportunity accounting mismatch')
+    if 'trace_export_ns' in summary:
+        require(runtime <= summary['trace_export_start_ns'] <= summary['trace_export_end_ns'] and
+                summary['trace_export_ns']==summary['trace_export_end_ns']-summary['trace_export_start_ns'],
+                'Invalid trace export timing')
     # Every scheduled opportunity is covered exactly once, with compact ranges
     # for missed wakes. A miss advances to a future wake, never relabels work.
     next_slot=1; slot_counts=Counter(); submitted=[]
@@ -174,6 +184,9 @@ def check(data, summary, harts, prediction_checks):
         for call,e in zip((p for p in data['predictions'] if p['caller']==caller),events[stage]):
             start=e['actual_wake_ns'] if caller==0 else e['selection_ns']
             require(start <= call['computed_ns'] <= e['submit_ns'], stage+': prediction was not requested for this opportunity')
+            for field in ('position','orientation'):
+                require(len(call[field])==len(e[field]) and all(abs(x-y)<=1e-8*(1+abs(x)) for x,y in zip(call[field],e[field])),
+                        stage+': returned pose differs from prediction service')
     result.update(fresh_warp_completed=fresh,fresh_reuse_with_updated_prediction=fresh_reuse_updated,
                   presentation={'counts':dict(display_counts),'fresh_on_time':fresh_presented,
                                 'maximum_observer_lateness_ns':max(observer_lateness,default=0)},

@@ -44,7 +44,8 @@ class DisplayScheduleTrace(unittest.TestCase):
         for e in self.events:
             predictions.append(dict(caller=int(e['stage']=='timewarp'),processing_hart=e['processing_hart'],
                 publication_hart=e['publication_hart'],status=0,source_ns=e['source_ns'],source_seq=e['source_sequence'],
-                target_ns=e['target_ns'],horizon_ns=e['prediction_horizon_ns'],computed_ns=e['submit_ns']))
+                target_ns=e['target_ns'],horizon_ns=e['prediction_horizon_ns'],computed_ns=e['submit_ns'],
+                position=e['position'],orientation=e['orientation']))
         for caller in (0,1):
             counts=[sum(p['caller']==caller and p['processing_hart']==h for p in predictions) for h in (0,1)]
             placements.append(dict(caller=caller,work_counts=counts,publication_counts=counts,hart_mask=sum(1<<h for h in (0,1) if counts[h])))

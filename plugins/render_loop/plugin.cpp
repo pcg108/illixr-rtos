@@ -23,28 +23,28 @@ protected:
     auto &clock = get_global_relative_clock();
     // After an overrun, wait for a future offset; never burst to catch up.
     const auto before = clock.now_ns();
-    if (next_slot_ && before >= gpu::render_wake(next_slot_)) {
+    if (gpu::render_next_slot && before >= gpu::render_wake(gpu::render_next_slot)) {
       const auto future = gpu::future_render_slot(before);
-      gpu::render_skipped_slots += future - next_slot_;
-      next_slot_ = future;
+      gpu::render_skipped_slots += future - gpu::render_next_slot;
+      gpu::render_next_slot = future;
     }
-    const auto scheduled = gpu::render_wake(next_slot_);
+    const auto scheduled = gpu::render_wake(gpu::render_next_slot);
     if (!gpu::sleep_until(scheduled) || should_terminate() || gpu::sources_done()) return;
     const auto actual = clock.now_ns();
-    if (actual >= gpu::vsync(next_slot_ + 1)) {
+    if (actual >= gpu::vsync(gpu::render_next_slot + 1)) {
       const auto future = gpu::future_render_slot(actual);
-      gpu::render_skipped_slots += future - next_slot_;
-      next_slot_ = future;
+      gpu::render_skipped_slots += future - gpu::render_next_slot;
+      gpu::render_next_slot = future;
       return;
     }
     gpu::Frame frame;
     frame.frame_id = ++gpu::render_submitted;
-    frame.slot = next_slot_++;
+    frame.slot = gpu::render_next_slot++;
     frame.image = &gpu::static_image;
     frame.scheduled_wake_ns = scheduled;
     frame.actual_wake_ns = actual;
     frame.processing_hart = replay::hart_id();
-    frame.presentation_ns = gpu::vsync(next_slot_);
+    frame.presentation_ns = gpu::vsync(gpu::render_next_slot);
     replay::record_placement(replay::RENDER_WORKER);
     frame.prediction = get_pose_prediction().predict(
         PredictionConsumer::Render, clock.dataset_origin_ns() + frame.presentation_ns);
@@ -60,8 +60,6 @@ protected:
 
   void _p_thread_teardown() override { gpu::close_render(); }
 
-private:
-  uint64_t next_slot_{};
 };
 
 void start_render_loop(phonebook_new &pb) {

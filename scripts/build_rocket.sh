@@ -26,6 +26,10 @@ data=${ILLIXR_DATASET_DIR:-/home/prashanth/illixr-headless-reference/data/mav0}
 generated=${ILLIXR_DATA_INCLUDE_DIR:-$work/generated-50}
 platform=${ILLIXR_ROCKET_PLATFORM:-$work/simulators/$rocket_config-platform.json}
 core_hz=500000000
+clock_scale=${ILLIXR_MODELED_CLOCK_SCALE:-2}
+case "$clock_scale" in 1|2) ;; *) echo 'ILLIXR_MODELED_CLOCK_SCALE must be 1 or 2' >&2; exit 2 ;; esac
+extra_conf="$repo/config/rocket_$mode.conf"
+if [[ "$clock_scale" == 2 ]]; then extra_conf+=";$repo/config/rocket_1ghz.conf"; fi
 preflight=${ILLIXR_PLATFORM_CHECK_ONLY:-0}
 case "$preflight" in 0|1) ;; *) echo 'ILLIXR_PLATFORM_CHECK_ONLY must be 0 or 1' >&2; exit 2 ;; esac
 name="rocket-$mode-$placement-50"
@@ -45,10 +49,11 @@ if [[ "${ILLIXR_CONFIGURE_ONLY:-0}" != 1 ]]; then
     python "$repo/scripts/record_rocket_build.py" --validate-platform "$platform" --harts "$harts"
     core_hz=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["core_hz"])' "$platform")
 fi
+core_hz=$((core_hz * clock_scale))
 cmake -S "$repo" -B "$build" -G Ninja \
     -DBOARD=chipyard_riscv64 -DCMAKE_BUILD_TYPE=Release \
     -DPYTHON_EXECUTABLE="$chipyard/.conda-env/bin/python" -DZEPHYR_MODULES= \
-    -DEXTRA_CONF_FILE="$repo/config/rocket_$mode.conf" \
+    -DEXTRA_CONF_FILE="$extra_conf" \
     -DDTC_OVERLAY_FILE="$repo/config/rocket_$mode.overlay" \
     -DOPENCV_SRC_DIR="$deps/opencv" -DYAML_FILE="$repo/profiles/imu.yaml" \
     -DILLIXR_DATASET_DIR="$data" -DILLIXR_DATASET_FRAMES=50 \
@@ -66,5 +71,5 @@ cp "$build/zephyr/zephyr.elf" "$build/zephyr/.config" "$build/zephyr/zephyr.dts"
 "$readelf_tool" -h -A "$artifact/zephyr.elf" > "$artifact/elf-attributes.txt"
 python "$repo/scripts/record_rocket_build.py" \
     --repo "$repo" --deps "$deps" --artifact "$artifact" --platform "$platform" \
-    --harts "$harts" --placement "$placement" --preflight "$preflight"
+    --harts "$harts" --placement "$placement" --preflight "$preflight" --modeled-clock-scale "$clock_scale"
 printf 'ELF: %s/zephyr.elf\n' "$artifact"
