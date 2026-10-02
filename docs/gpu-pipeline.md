@@ -94,6 +94,7 @@ override `CONFIG_SYS_CLOCK_TICKS_PER_SEC` to reproduce the earlier 1 kHz tick.
 Runner cases record clock settings from the firmware manifest and check them
 against compiled settings before execution. Previous artifacts retain their
 original clock interpretation. See [clock experiments](clock-experiments.md).
+The accepted combined-setting run is recorded in [current baseline](current-baseline.md).
 
 The final workload summary measures `trace_export_start_ns`, `trace_export_end_ns`,
 and `trace_export_ns` around the bulk console dump after worker shutdown. This
@@ -101,6 +102,10 @@ separates application time from the expensive trace output; the final diagnostic
 and summary lines are outside that measured span. FireSim's total target cycles
 include startup, application work, trace export, and exit. Host wall time also
 includes deployment and simulator overhead.
+
+Bulk traces now use [batched export with host formatting](batched-traces.md).
+Runners preserve the raw transfer and reconstruct the same `console.log` schema
+before analysis. `-DILLIXR_BATCH_TRACE=OFF` retains the legacy diagnostic path.
 
 Frame deadlines and GPU timestamps use elapsed runtime nanoseconds. Prediction
 targets and source IMU timestamps use the dataset epoch, obtained by adding the

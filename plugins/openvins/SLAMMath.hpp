@@ -17,6 +17,10 @@
 #include <cmath>
 #include <algorithm>
 
+#ifdef ILLIXR_DIAGNOSTIC_IMAGE_ADDRESS
+#include <zephyr/sys/printk.h>
+#endif
+
 namespace OpenVINS {
 
 // ==============================================================================
@@ -159,19 +163,50 @@ inline Eigen::Vector2d undistort_point(const Eigen::Vector2d& uv,
 // ==============================================================================
 // TEMPLATE MATCHING (Replaces KLT)
 // ==============================================================================
+inline bool template_center_fits(const cv::Mat& image, int x, int y, int size) {
+    if (size <= 0 || size > image.cols || size > image.rows) return false;
+    const int half = size / 2;
+    // Subtract the radius from bounded image dimensions, never add it to an
+    // unchecked coordinate (INT_MAX + half would overflow).
+    return x >= half && x < image.cols - half &&
+           y >= half && y < image.rows - half;
+}
+
 inline double ncc_match(const cv::Mat& img1, const cv::Mat& img2,
                        int x1, int y1, int x2, int y2, int template_size) {
     int half = template_size / 2;
+
+#ifdef ILLIXR_DIAGNOSTIC_IMAGE_ADDRESS
+    // Observe rejected coordinates without overflowing diagnostic arithmetic.
+    if (static_cast<int64_t>(x2) - half < 0 ||
+        static_cast<int64_t>(x2) + half >= img2.cols ||
+        static_cast<int64_t>(y2) - half < 0 ||
+        static_cast<int64_t>(y2) + half >= img2.rows) {
+        static unsigned reports = 0;
+        if (reports++ < 8) {
+            printk("ILLIXR_IMAGE_ADDRESS x1=%d y1=%d x2=%d y2=%d half=%d rows=%d cols=%d data=%p end=%p stride=%lu\n",
+                   x1, y1, x2, y2, half, img2.rows, img2.cols,
+                   img2.data, img2.dataend, static_cast<unsigned long>(img2.step[0]));
+        }
+    }
+#endif
     
-    if (x1 - half < 0 || x1 + half >= img1.cols ||
-        y1 - half < 0 || y1 + half >= img1.rows ||
-        x2 - half < 0 || x2 + half >= img2.cols ||
-        y2 - half < 0 || y2 + half >= img2.rows) {
+    if (!template_center_fits(img1, x1, y1, template_size) ||
+        !template_center_fits(img2, x2, y2, template_size)) {
         return -1.0;
     }
     
     cv::Mat templ1 = img1(cv::Rect(x1 - half, y1 - half, template_size, template_size));
     cv::Mat templ2 = img2(cv::Rect(x2 - half, y2 - half, template_size, template_size));
+
+#ifdef ILLIXR_DIAGNOSTIC_IMAGE_ADDRESS
+    if (reinterpret_cast<uintptr_t>(templ2.data) < reinterpret_cast<uintptr_t>(img2.data) ||
+        reinterpret_cast<uintptr_t>(templ2.data) >= reinterpret_cast<uintptr_t>(img2.dataend)) {
+        printk("ILLIXR_IMAGE_ROI x2=%d y2=%d half=%d rows=%d cols=%d data=%p end=%p roi=%p stride=%lu\n",
+               x2, y2, half, img2.rows, img2.cols, img2.data, img2.dataend,
+               templ2.data, static_cast<unsigned long>(img2.step[0]));
+    }
+#endif
     
     double sum1 = 0, sum2 = 0, sum12 = 0, sum11 = 0, sum22 = 0;
     int count = template_size * template_size;
@@ -241,9 +276,16 @@ inline bool track_stereo_epipolar(const cv::Mat& img_left, const cv::Mat& img_ri
                                   const cv::Point2f& pt_left, cv::Point2f& pt_right,
                                   const Eigen::Matrix3d& F,
                                   int template_size, int disp_max, double threshold) {
+    // Validate before float-to-int conversion; NaN/Inf and out-of-image
+    // coordinates are not valid template centers.
+    if (!(pt_left.x >= 0 && pt_left.x < img_left.cols &&
+          pt_left.y >= 0 && pt_left.y < img_left.rows)) return false;
     int x0 = (int)pt_left.x;
     int y0 = (int)pt_left.y;
     int half = template_size / 2;
+    if (!template_center_fits(img_left, x0, y0, template_size) ||
+        template_size <= 0 || template_size > img_right.cols ||
+        template_size > img_right.rows) return false;
 
     // Epipolar line in right image: [a, b, c] = F * [x0, y0, 1]
     Eigen::Vector3d l = F * Eigen::Vector3d(x0, y0, 1.0);
@@ -257,10 +299,13 @@ inline bool track_stereo_epipolar(const cv::Mat& img_left, const cv::Mat& img_ri
     // Step along x from x0-disp_max to x0+disp_max, compute y from line eq
     for (int dx = -disp_max; dx <= disp_max; dx++) {
         int xi = x0 + dx;
-        int yi = static_cast<int>(std::round(-(a * xi + c) / b));
+        const double rounded_y = std::round(-(a * xi + c) / b);
+        // Range-check while still floating point. This also rejects NaN and
+        // infinity, without an undefined out-of-range conversion to int.
+        if (!(rounded_y >= half && rounded_y < img_right.rows - half)) continue;
+        int yi = static_cast<int>(rounded_y);
 
-        if (xi - half < 0 || xi + half >= img_right.cols ||
-            yi - half < 0 || yi + half >= img_right.rows) continue;
+        if (!template_center_fits(img_right, xi, yi, template_size)) continue;
 
         double score = ncc_match(img_left, img_right, x0, y0, xi, yi, template_size);
         if (score > best_score) {

@@ -24,6 +24,7 @@ import tarfile
 import time
 
 from analyze_spike import analyze, records, startup_checks
+from blas_analysis import vector_preflight_errors, gemmini_edge_preflight_errors
 from run_rocket import preserve_inputs
 from run_rocket_matrix import attempts, markdown, next_output, read_json
 from run_spike import git_revision, sha256, stop, prediction_reference
@@ -107,6 +108,12 @@ def validate_firmware(case, hardware=None):
     elf = Path(case['elf'])
     build = json.loads((elf.parent / 'build_manifest.json').read_text())
     target = build['target']
+    if case.get('ritnet_standalone') and build.get('kind') != 'ritnet_standalone':
+        raise ValueError('RITNet standalone case requires its explicit firmware manifest')
+    if case.get('require_eye') and not build.get('ritnet', {}).get('enabled'):
+        raise ValueError('Eye-tracking case requires eye-enabled firmware provenance')
+    if case.get('linalg_backend') and build.get('linalg', {}).get('backend') != case['linalg_backend']:
+        raise ValueError('Firmware linear algebra backend differs from requested case')
     expected_placement = 'pinned' if case['placement'] == 'pinned' else 'scheduler'
     if (target['harts'] != case['harts'] or target['placement'] != expected_placement or
             target['platform_check_only'] is not case['platform_check']):
@@ -119,6 +126,22 @@ def validate_firmware(case, hardware=None):
     if type(scale) is not int or scale not in (1, 2) or target.get('modeled_clock_scale', 1) != scale:
         raise ValueError('Firmware and case must agree on the explicit modeled clock scale')
     if hardware:
+        if case.get('require_eye') or case.get('ritnet_standalone'):
+            accelerator = hardware.get('ritnet', {})
+            header = accelerator.get('header', {})
+            if (accelerator.get('harts') != [0] or accelerator.get('precision') != 'int8' or
+                    accelerator.get('dim') != 16 or accelerator.get('custom_opcode') != 2 or
+                    not header.get('path') or header.get('sha256') != sha256(header['path']) or
+                    header.get('sha256') != build.get('ritnet', {}).get('params_sha256')):
+                raise ValueError('Eye firmware requires verified matching INT8 hardware on hart zero')
+        if build.get('linalg', {}).get('backend') == 'openblas_gemmini_fp32':
+            accelerator = hardware.get('gemmini', {})
+            header = accelerator.get('header', {})
+            if (accelerator.get('harts') != [0] or accelerator.get('precision') != 'fp32' or
+                    accelerator.get('dim') != 4 or not header.get('path') or
+                    header.get('sha256') != sha256(header['path']) or
+                    header.get('sha256') != build['linalg'].get('gemmini_params_sha256')):
+                raise ValueError('Gemmini firmware requires verified matching FP32 hardware on hart zero')
         clocks = effective_clocks(case, hardware)
         if target['timer_hz'] != clocks['timer_hz']:
             raise ValueError('Firmware timer frequency differs from verified FireSim hardware clock model')
@@ -206,8 +229,38 @@ def validate_hardware(path, harts, require_bundle=True):
         raise ValueError('Hardware verification and timing closure must both pass before FPGA execution')
     if hardware.get('harts') != harts or hardware.get('hart_ids') != list(range(harts)):
         raise ValueError('Verified hardware hart count or IDs differ from requested configuration')
-    if hardware.get('config') != f'illixr_u250_rocket_{MODES[harts]}':
+    expected_rocket = f'illixr_u250_rocket_{MODES[harts]}'
+    expected_vectors = (f'illixr_u250_shuttle_saturn_{MODES[harts]}',
+                        f'illixr_u250_rocket_saturn_{MODES[harts]}',
+                        f'illixr_u250_rocket_gemmini_saturn_{MODES[harts]}',
+                        f'illixr_u250_rocket_dual_gemmini_saturn_{MODES[harts]}',
+                        f'illixr_u250_rocket_int8_gemmini_saturn_{MODES[harts]}')
+    if hardware.get('config') not in (expected_rocket, *expected_vectors):
         raise ValueError('Hardware manifest has an unexpected FireSim configuration')
+    if hardware.get('config') in expected_vectors:
+        if harts not in (1,4) or hardware.get('vlen') != 256 or hardware.get('elen') != 64 or hardware.get('datapath_bits') != 128:
+            raise ValueError('Saturn vector parameters differ from the accepted configuration')
+        cpus=hardware.get('cpus',[])
+        if len(cpus)!=harts or any('zvl256b' not in cpu.get('isa','') or 'zve64d' not in cpu.get('isa','') for cpu in cpus):
+            raise ValueError('Saturn lacks per-hart FP64/vector ISA evidence')
+    if hardware.get('config') in (f'illixr_u250_rocket_gemmini_saturn_{MODES[harts]}',
+                                  f'illixr_u250_rocket_dual_gemmini_saturn_{MODES[harts]}'):
+        accelerator = hardware.get('gemmini', {})
+        expected = {'harts': [0], 'precision': 'fp32', 'dim': 4,
+                    'scratch_kib': 32, 'accumulator_kib': 8, 'custom_opcode': 3}
+        header = accelerator.get('header', {})
+        if (any(accelerator.get(key) != value for key, value in expected.items()) or
+                not header.get('path') or header.get('sha256') != sha256(header['path'])):
+            raise ValueError('Gemmini hardware parameters or generated header identity differ')
+    if hardware.get('config') in (f'illixr_u250_rocket_dual_gemmini_saturn_{MODES[harts]}',
+                                  f'illixr_u250_rocket_int8_gemmini_saturn_{MODES[harts]}'):
+        accelerator = hardware.get('ritnet', {})
+        expected = {'harts': [0], 'precision': 'int8', 'dim': 16,
+                    'scratch_kib': 256, 'accumulator_kib': 64, 'custom_opcode': 2}
+        header = accelerator.get('header', {})
+        if (any(accelerator.get(key) != value for key, value in expected.items()) or
+                not header.get('path') or header.get('sha256') != sha256(header['path'])):
+            raise ValueError('INT8 hardware parameters or generated header identity differ')
     if (hardware.get('timer_hz') != 500_000 or hardware.get('core_hz') != 500_000_000 or
             hardware.get('memory_base') != 0x80000000 or hardware.get('memory_size') != 0x10000000):
         raise ValueError('Verified FireSim clocks/RAM do not match the preserved Rocket firmware')
@@ -353,7 +406,7 @@ def runtime_config(case, work, sim_dir, workload_name):
         'target_config': {'topology': 'no_net_config', 'no_net_num_nodes': 1, 'link_latency': 6405,
             'switching_latency': 10, 'net_bandwidth': 200,
             'profile_interval': case['memory_profile_interval_cycles'],
-            'default_hw_config': f"illixr_u250_rocket_{MODES[case['harts']]}",
+            'default_hw_config': case.get('hardware_config', f"illixr_u250_rocket_{MODES[case['harts']]}"),
             'plusarg_passthrough': f"+max-cycles={case['max_cycles']}"},
         'tracing': {'enable': False, 'output_format': 0, 'selector': 1, 'start': 0, 'end': -1},
         'autocounter': {'read_rate': 0},
@@ -380,7 +433,8 @@ def prepare_case(case, work, directory, hardware=None):
     write_json(directory / 'workload.json', workload)
     symlink_input(deploy / 'workloads' / (name + '.json'), directory / 'workload.json')
     symlink_input(deploy / 'workloads' / name, inputs)
-    write_json(directory / 'runtime.yaml', runtime_config(case, work, directory / 'runfarm', name + '.json'))
+    runtime_case = {**case, **({'hardware_config': hardware['config']} if hardware else {})}
+    write_json(directory / 'runtime.yaml', runtime_config(runtime_case, work, directory / 'runfarm', name + '.json'))
     if hardware:
         hwdb = {hardware['config']: {'bitstream_tar': Path(hardware['bitstream']).resolve().as_uri(),
             'driver_tar': Path(hardware['driver_tar']).resolve().as_uri(),
@@ -619,9 +673,19 @@ def analyze_case(case, hardware, directory, execution, args):
     raw = uart.read_bytes() if uart.is_file() else b''
     (directory / 'uartlog.raw').write_bytes(raw)
     console = normalize_uart(raw)
+    from trace_batches import decode_console
+    transfer_errors = []
+    try:
+        decode_started = time.perf_counter()
+        console, transfer = decode_console(console)
+        transfer['host_decode_seconds'] = time.perf_counter() - decode_started
+        write_json(directory / 'trace-transfer.json', transfer)
+    except (ValueError, UnicodeError) as error:
+        transfer_errors.append('Trace batch decoding failed: ' + str(error))
     log = directory / 'console.log'
     log.write_text(console)
     extra_errors = execution_errors(execution, console)
+    extra_errors.extend(transfer_errors)
     memory_stats = collect_memory_stats(directory, case['memory_profile_interval_cycles'])
     extra_errors.extend(memory_stats['errors'])
     native_log = None
@@ -657,12 +721,40 @@ def analyze_case(case, hardware, directory, execution, args):
                     extra_errors.extend(reference_errors)
                 except (OSError, ValueError, subprocess.SubprocessError) as error:
                     extra_errors.append(f'Desktop prediction/transform reference failed: {error}')
+    if case.get('linalg_backend'):
+        actual = data['blas'][0].get('backend') if len(data.get('blas', [])) == 1 else None
+        if actual != case['linalg_backend']:
+            extra_errors.append('Runtime linear algebra backend differs from requested case')
+        if case['platform_check'] and actual != 'eigen' and not case.get('ritnet_standalone'):
+            if actual in ('openblas_rvv', 'openblas_gemmini_fp32'):
+                extra_errors.extend(vector_preflight_errors(data, case['harts']))
+            tests=data.get('blas_selftests',[])
+            if len(tests)!=1 or tests[0].get('passed') is not True:
+                extra_errors.append('BLAS numerical preflight did not pass')
+            if actual == 'openblas_gemmini_fp32':
+                extra_errors.extend(gemmini_edge_preflight_errors(data))
+                gemmini = data.get('gemmini_selftests', [])
+                if (len(gemmini) != 1 or gemmini[0].get('passed') is not True or
+                        gemmini[0].get('errors') != 0 or
+                        gemmini[0].get('caller_hart_mask') != (1 << case['harts']) - 1 or
+                        gemmini[0].get('caller_migrations') != (4*case['harts'] if case['harts'] > 1 else 0)):
+                    extra_errors.append('Gemmini numerical/ownership/migration preflight failed')
+                operations = data.get('gemmini', [])
+                if (len(operations) != 4 or {r.get('name') for r in operations} != {'sgemm','dgemm','sgemv','dgemv'} or
+                        any(r.get('phase') != 'selftest' or r.get('accelerator_hart_mask') != 1 or r.get('submissions', 0) <= 0 for r in operations)):
+                    extra_errors.append('Gemmini preflight lacks actual hart-zero execution evidence')
+    if case.get('ritnet_standalone'):
+        from ritnet_validation import standalone_errors
+        extra_errors.extend(standalone_errors(data, console, case['harts'],
+            case.get('linalg_backend') == 'openblas_gemmini_fp32', vector_required=True))
+    if case.get('require_eye') and result.get('eye_tracking', {}).get('passed') is not True:
+        extra_errors.append('Required eye inference validation missing or failed')
     result['errors'].extend(extra_errors)
     terminal = re.search(r'\*\*\* (?:PASSED \*\*\*|FAILED \*\*\* \(code = \d+\)) after \d+ cycles', console)
     trace_complete = (len(data['clocks']) == 1 and len(data['platforms']) == 1) if case['platform_check'] else len(data['summaries']) == 1
     result['complete'] = bool(execution.get('stage', 'runworkload') == 'runworkload' and terminal and trace_complete and
         not any(execution.get(k) for k in ('timed_out', 'interrupted', 'cycle_limit_reached')) and
-        memory_stats['evidence_complete'])
+        memory_stats['evidence_complete'] and not transfer_errors)
     if 'simulation timed out' in console:
         result['complete'] = False
     if not result['complete']:

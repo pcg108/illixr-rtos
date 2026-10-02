@@ -1,0 +1,18 @@
+--- a/src/main/scala/rocket/RocketCore.scala
++++ b/src/main/scala/rocket/RocketCore.scala
+@@ -1098,7 +1098,14 @@
+   io.imem.sfence.bits.hg := wb_reg_hfence_g
+   io.ptw.sfence := io.imem.sfence
+ 
+-  ibuf.io.inst(0).ready := !ctrl_stalld
++  // Saturn may defer a scalar interrupt while its memory fault check is busy.
++  // ctrl_killd prevents issuing these instructions, so consuming them from IBuf
++  // would advance the eventual trap PC past instructions that never executed.
++  // Hold a complete instruction until the interrupt redirects the frontend.
++  // An incomplete instruction must still accept its remaining fetch half;
++  // otherwise an interrupt at a straddled 32-bit instruction can deadlock.
++  ibuf.io.inst(0).ready := !ctrl_stalld &&
++    !(usingVector.B && csr.io.interrupt && ibuf.io.inst(0).valid)
+ 
+   io.imem.btb_update.valid := mem_reg_valid && !take_pc_wb && mem_wrong_npc && (!mem_cfi || mem_cfi_taken)
+   io.imem.btb_update.bits.isValid := mem_cfi

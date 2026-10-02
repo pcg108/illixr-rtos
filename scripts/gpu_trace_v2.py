@@ -123,8 +123,9 @@ def check(data, summary, harts, prediction_checks):
         previous=e
     require(gpu['distinct_selected']==len(selected) and gpu['never_selected']==len(renders)-len(selected), 'Completed render selection accounting mismatch')
     require(gpu['repeated_uses']==repeats and len(warps)==len(selected)+repeats, 'Incorrect reuse accounting')
-    require(fresh==gpu['fresh_warp_completed'] and fresh>0, 'No matching fresh render/timewarp completion')
-    if warps:
+    require(fresh==gpu['fresh_warp_completed'] and (fresh>0 or data.get('eye_legacy_synchronous',False)), 'No matching fresh render/timewarp completion')
+    eye_final_expired = bool(data.get('eye_legacy_synchronous') and data['eye_results'][-1]['final'] and data['eye_results'][-1]['expired'])
+    if warps and not eye_final_expired:
         require(warps[-1]['final'] and sum(e['final'] for e in warps)==1 and warps[-1]['frame_id']==renders[-1]['frame_id'], 'Final-frame shutdown missing or not unique')
     require(not renders or renders[-1]['slot']+1 <= len(renders)+gpu['render_skipped_slots'], 'Unaccounted render opportunities')
     if 'render_next_slot' in gpu:
@@ -171,11 +172,11 @@ def check(data, summary, harts, prediction_checks):
         require(d['outcome']==outcome and d['fresh_on_time']==fresh_on_time, 'Incorrect presentation outcome or freshness')
         display_counts[outcome]+=1; fresh_presented+=fresh_on_time; previous_id=identifier
         observer_lateness.append(d['observer_lateness_ns'])
-    end=publications[-1] if publications else gpu['timewarp_done_ns']
+    end=max(publications[-1],gpu['timewarp_done_ns']) if publications else gpu['timewarp_done_ns']
     require(len(data['displays'])==gpu['display_slots']==(end+P-1)//P, 'Incomplete or excessive final presentation history')
     for key,outcome in (('new_outputs','new'),('repeated_outputs','repeated'),('no_outputs','none')):
         require(gpu[key]==display_counts[outcome], 'Display accounting mismatch: '+outcome)
-    require(fresh_presented==gpu['fresh_on_time_presentations'] and fresh_presented>0, 'No fresh on-time modeled presentation')
+    require(fresh_presented==gpu['fresh_on_time_presentations'] and (fresh_presented>0 or data.get('eye_legacy_synchronous',False)), 'No fresh on-time modeled presentation')
     require(gpu['render_closed_ns'] <= gpu['timewarp_done_ns'] <= runtime, 'Invalid EOS chronology')
     result.update(prediction_checks(data,gpu,events,harts,errors))
     # Per-call correlation also prevents reusing an old prediction for a reused
@@ -187,6 +188,7 @@ def check(data, summary, harts, prediction_checks):
             for field in ('position','orientation'):
                 require(len(call[field])==len(e[field]) and all(abs(x-y)<=1e-8*(1+abs(x)) for x,y in zip(call[field],e[field])),
                         stage+': returned pose differs from prediction service')
+    result['display_performance_passed'] = fresh_presented > 0
     result.update(fresh_warp_completed=fresh,fresh_reuse_with_updated_prediction=fresh_reuse_updated,
                   presentation={'counts':dict(display_counts),'fresh_on_time':fresh_presented,
                                 'maximum_observer_lateness_ns':max(observer_lateness,default=0)},

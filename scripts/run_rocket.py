@@ -173,6 +173,9 @@ def run(args):
                 "harts": args.harts, "placement": args.placement, "platform_check": args.platform_check,
                 "timeout_seconds": args.timeout, "max_cycles": args.max_cycles,
                 "fast_elf_loading": True, "instruction_log": False, "waveforms": False}
+    metadata['clock_model'] = {**clocks, **firmware_clock_settings(elf),
+                               'generated_core_hz': hardware['core_hz'],
+                               'generated_timer_hz': hardware['timer_hz']}
     metadata.update(preserve_inputs(directory, elf, manifest_path, hardware_dts, root))
     if not args.platform_check:
         dataset_path = directory / "dataset_manifest.json"
@@ -185,7 +188,11 @@ def run(args):
     log = directory / "console.log"
     native_log = None
     extra_errors = execution_errors(execution)
+    trace_decoded = False
     try:
+        from trace_batches import decode_file
+        metadata['trace_transfer'] = decode_file(log)
+        trace_decoded = True
         data = records(log)
         metadata["final_result_seen"] = len(data["summaries"]) == 1
         metadata["platform_result_seen"] = len(data["platforms"]) == 1
@@ -220,7 +227,7 @@ def run(args):
     result["host_elapsed_seconds"] = execution["host_elapsed_seconds"]
     result["hardware_config"] = hardware["config"]
     result["firmware_sha256"] = metadata["elf_sha256"]
-    result["complete"] = not (execution["timed_out"] or execution["interrupted"] or execution["cycle_limit_reached"])
+    result["complete"] = trace_decoded and not (execution["timed_out"] or execution["interrupted"] or execution["cycle_limit_reached"])
     metadata["status"] = "pass" if result["passed"] else ("fail" if result["complete"] else "incomplete")
     (directory / "analysis.json").write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     (directory / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")

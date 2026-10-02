@@ -36,8 +36,11 @@ Rocket RTL validation
 
 See ``docs/rocket-validation.md`` for single-, dual-, and quad-core Rocket
 Verilator builds, platform checks, plugin affinity, and per-plugin hart evidence.
-The Rocket firmware uses the generated hardware timer frequency and keeps the
-same bounded 50-pair dataset and estimator math as the Spike validation.
+The Rocket/FireSim baseline models a 1 GHz CPU with a 1 MHz timer declaration
+and 10 kHz Zephyr ticks. It preserves the hardware's 1000:1 CPU/timer ratio,
+the bounded 50-pair dataset, and estimator math. See
+``docs/clock-experiments.md`` for the historical clock comparison.
+``docs/current-baseline.md`` records the accepted combined-setting FireSim run.
 ``docs/rocket-results.md`` records verified startup results and links to the
 automatically updated workload comparison report.
 
@@ -59,3 +62,7 @@ the dummy stereo image remains unchanged. See ``docs/gpu-pipeline.md`` for
 interfaces, timing assumptions, bounded storage, and validation details.
 ``scripts/run_gpu_pipeline.py`` validates dual/quad Spike before allowing the
 quad-core FireSim workload.
+
+Bulk trace export uses buffered HTIF writes and host-side JSON formatting.
+See ``docs/batched-traces.md`` for the protocol, validation, and measured
+FireSim improvement from 33.3 to 8.3 minutes per workload case.

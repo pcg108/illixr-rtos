@@ -15,6 +15,24 @@ import run_firesim_matrix as matrix
 
 
 class FireSimValidation(unittest.TestCase):
+    def test_gemmini_requires_matching_generated_hardware(self):
+        case = self.cases[0]
+        path = Path(case['elf']).parent / 'build_manifest.json'
+        build = json.loads(path.read_text())
+        header = self.work / 'gemmini_params.h'
+        header.write_text('FP32 4x4 generated parameters\n')
+        build['linalg'] = {'backend': 'openblas_gemmini_fp32', 'gemmini_params_sha256': matrix.sha256(header)}
+        matrix.write_json(path, build)
+        hardware = self.hardware[case['harts']]
+        with self.assertRaisesRegex(ValueError, 'Gemmini firmware requires'):
+            matrix.validate_firmware(case, hardware)
+        hardware['gemmini'] = {'harts':[0], 'precision':'fp32', 'dim':4,
+                              'header':{'path':str(header), 'sha256':matrix.sha256(header)}}
+        matrix.validate_firmware(case, hardware)
+        header.write_text('different hardware\n')
+        with self.assertRaisesRegex(ValueError, 'Gemmini firmware requires'):
+            matrix.validate_firmware(case, hardware)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -94,6 +112,48 @@ class FireSimValidation(unittest.TestCase):
         workloads = [(c['harts'], c['placement']) for c in self.cases if not c['platform_check']]
         self.assertEqual(workloads, [(1, 'unpinned'), (2, 'unpinned'), (2, 'pinned'), (4, 'unpinned'), (4, 'pinned')])
 
+    def test_rocket_saturn_requires_vector_hardware_evidence(self):
+        hardware = self.hardware[1]
+        hardware.update(config='illixr_u250_rocket_saturn_single')
+        path = self.work / 'control/hardware-1.json'
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError, 'vector parameters'):
+            matrix.validate_hardware(path, 1)
+        hardware.update(vlen=256, elen=64, datapath_bits=128,
+                        cpus=[{'isa': 'rv64imafdcv_zvl256b_zve64d'}])
+        matrix.write_json(path, hardware)
+        matrix.validate_hardware(path, 1)
+        hardware['cpus'][0]['isa'] = 'rv64imafdc'
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError, 'FP64/vector ISA'):
+            matrix.validate_hardware(path, 1)
+
+    def test_gemmini_saturn_hardware_requires_accelerator_and_vector_evidence(self):
+        hardware = self.hardware[4]
+        hardware.update(config='illixr_u250_rocket_gemmini_saturn_quad',
+                        vlen=256, elen=64, datapath_bits=128,
+                        cpus=[{'isa': 'rv64imafdcv_zvl256b_zve64d'} for _ in range(4)])
+        path = self.work / 'control/hardware-4.json'
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError, 'Gemmini hardware'):
+            matrix.validate_hardware(path, 4)
+        header = self.work / 'control/gemmini-params.h'
+        header.write_text('generated FP32 parameters')
+        hardware['gemmini'] = dict(harts=[0], precision='fp32', dim=4,
+            scratch_kib=32, accumulator_kib=8, custom_opcode=3,
+            header={'path': str(header), 'sha256': matrix.sha256(header)})
+        matrix.write_json(path, hardware)
+        matrix.validate_hardware(path, 4)
+        hardware['gemmini']['harts'] = [0, 1]
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError, 'Gemmini hardware'):
+            matrix.validate_hardware(path, 4)
+        hardware['gemmini']['harts'] = [0]
+        hardware['cpus'][3]['isa'] = 'rv64imafdc'
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError, 'FP64/vector ISA'):
+            matrix.validate_hardware(path, 4)
+
     def test_clock_scaling_requires_matching_explicit_firmware_and_case(self):
         case = dict(self.cases[-2], modeled_clock_scale=2, ticks_per_sec=1000)
         directory = Path(case['elf']).parent
@@ -152,6 +212,28 @@ class FireSimValidation(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, key + ' hash'):
                 matrix.validate_hardware(path, 1)
             source.write_bytes(before)
+
+    def test_shuttle_saturn_requires_per_hart_vector_evidence(self):
+        hardware = json.loads(json.dumps(self.hardware[4]))
+        hardware.update(config='illixr_u250_shuttle_saturn_quad', vlen=256, elen=64,
+                        datapath_bits=128, cpus=[{'isa':'rv64imafdcv_zvl256b_zve64d'} for _ in range(4)])
+        path = self.work / 'control/hardware-4.json'
+        matrix.write_json(path, hardware)
+        self.assertEqual(matrix.validate_hardware(path, 4)['vlen'],256)
+        hardware['cpus'][3]['isa']='rv64imafdc'
+        matrix.write_json(path, hardware)
+        with self.assertRaisesRegex(ValueError,'per-hart'):
+            matrix.validate_hardware(path,4)
+
+    def test_runtime_selects_explicit_shuttle_image(self):
+        case={**self.cases[0], 'hardware_config':'illixr_u250_shuttle_saturn_single'}
+        config=matrix.runtime_config(case,self.work,self.work/'runtime','a.json')
+        self.assertEqual(config['target_config']['default_hw_config'],case['hardware_config'])
+
+    def test_requested_blas_backend_must_match_firmware(self):
+        case={**self.cases[0], 'linalg_backend':'openblas_scalar'}
+        with self.assertRaisesRegex(ValueError,'linear algebra backend'):
+            matrix.validate_firmware(case)
 
     def test_modified_firmware_config_or_dataset_rejected(self):
         case = self.cases[1]
@@ -482,6 +564,50 @@ class FireSimValidation(unittest.TestCase):
         self.assertEqual(len(result['placement']['plugins']), 4)
         self.assertTrue(result['memory_stats']['evidence_complete'])
         self.assertEqual(result['memory_stats']['files'][0]['last_traffic']['totalReads'], 100)
+
+    def test_vector_preflight_requires_complete_context_evidence(self):
+        case, directory, args, execution = self.synthetic_workload()
+        case = {**case, 'platform_check': True}
+        uart = directory / 'runfarm/sim_slot_0/uartlog'
+        clock_lines = matrix.normalize_uart(uart.read_bytes()).splitlines()[:2]
+        vector = dict(passed=True, errors=0, vlenb=32, fp64=True, hart_mask=15,
+                      worker_rounds=[32]*8, migrations=16)
+        variants = [('complete', [vector], True), ('missing', [], False),
+                    ('duplicate', [vector, vector], False)]
+        for key, value in [('passed', False), ('errors', 1), ('vlenb', 16),
+                           ('fp64', False), ('hart_mask', 7),
+                           ('worker_rounds', [32]*7+[31]), ('migrations', 0)]:
+            variants.append((key, [{**vector, key: value}], False))
+        for backend in ('openblas_rvv', 'openblas_gemmini_fp32'):
+            case['linalg_backend'] = backend
+            base = clock_lines + ['ILLIXR_BLAS ' + json.dumps({'backend': backend}),
+                'ILLIXR_BLAS_SELFTEST ' + json.dumps({'passed': True, 'checks': 100})]
+            if backend == 'openblas_gemmini_fp32':
+                base.append('ILLIXR_GEMMINI_SELFTEST ' + json.dumps(dict(
+                    passed=True, errors=0, caller_hart_mask=15, caller_migrations=16)))
+                base += ['ILLIXR_GEMMINI ' + json.dumps(dict(name=name, phase='selftest',
+                    accelerator_hart_mask=1, submissions=1))
+                    for name in ('sgemm', 'dgemm', 'sgemv', 'dgemv')]
+            for name, records, should_pass in variants:
+                with self.subTest(backend=backend, evidence=name):
+                    lines = base + ['ILLIXR_VECTOR_CHECK ' + json.dumps(v) for v in records]
+                    uart.write_text('\n'.join(lines + ['*** PASSED *** after 50000000 cycles'])+'\n')
+                    result = matrix.analyze_case(case, self.hardware[4], directory, execution, args)
+                    self.assertEqual(result['passed'], should_pass, result['errors'])
+                    if not should_pass:
+                        self.assertTrue(any('vector context preflight' in e.lower()
+                                            for e in result['errors']))
+
+    def test_incomplete_batch_cannot_pass_with_normal_exit_and_valid_plain_summary(self):
+        case, directory, args, execution = self.synthetic_workload()
+        uart = directory / 'runfarm/sim_slot_0/uartlog'
+        uart.write_bytes(b'ILLIXR_BATCH_BEGIN 1\n' + uart.read_bytes())
+        with patch.object(matrix.subprocess, 'run') as native:
+            result = matrix.analyze_case(case, self.hardware[4], directory, execution, args)
+            native.assert_not_called()
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['complete'])
+        self.assertTrue(any('Trace batch decoding failed' in e for e in result['errors']))
 
     def test_memory_axi_error_fails_even_with_complete_firmware_success(self):
         case, directory, args, execution = self.synthetic_workload()

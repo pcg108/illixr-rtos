@@ -69,8 +69,9 @@ def analyze(trace, output_dir):
         if len(report['errors']) < 100:
             report['errors'].append(message)
     records, transforms, summaries, placements = [], [], [], []
+    eye_configs, eye_results = [], []
     for lineno, line in enumerate(trace.read_text(errors='replace').splitlines(), 1):
-        for marker, target in [('ILLIXR_PREDICTION ', records),
+        for marker, target in [('ILLIXR_EYE_CONFIG ', eye_configs), ('ILLIXR_EYE_RESULT ', eye_results), ('ILLIXR_PREDICTION ', records),
                                ('ILLIXR_PREDICTION_SUMMARY ', summaries),
                                ('ILLIXR_PREDICTION_PLACEMENT ', placements),
                                ('ILLIXR_GPU_EVENT ', transforms)]:
@@ -94,7 +95,13 @@ def analyze(trace, output_dir):
     elif summaries[0].get('calls') != len(records) or summaries[0].get('overflow') or summaries[0].get('invalid'):
         error('prediction summary reports missing records, overflow, or invalid predictions')
     if not transforms:
-        error('no timewarp transform records')
+        expired_eye_run = (len(eye_configs)==1 and eye_configs[0].get('enabled') is True and
+            eye_configs[0].get('synchronous') is True and bool(eye_results) and
+            all(r.get('expired') is True and r.get('warp_id')==0 for r in eye_results))
+        if not expired_eye_run: error('no timewarp transform records')
+        report['transform_coverage'] = 'not exercised: all synchronous eye requests expired' if expired_eye_run else 'missing'
+    else:
+        report['transform_coverage'] = 'compared against native kernels'
     requests, mappings = [], []
     previous_valid = {}
     expected_offset = [1.0, 0.0, 0.0, 0.0]

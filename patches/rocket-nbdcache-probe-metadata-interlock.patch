@@ -1,0 +1,23 @@
+Subject: [PATCH] rocket: block probes while dirty metadata update is pending
+
+A clean-to-dirty store may wait for the metadata write port while ProbeUnit
+has already read the old clean state. meta_hazard starts only after the
+metadata write fires, so a probe can accept that stale state in the same
+cycle as the write. It then invalidates the line before the store replay,
+which acknowledges the store with a zero way mask and loses the update.
+
+Keep same-index probes blocked in s_meta_write_req, then retain the
+existing post-write metadata hazard delay. No interrupt or software
+scheduling changes are involved.
+
+--- a/src/main/scala/rocket/NBDcache.scala
++++ b/src/main/scala/rocket/NBDcache.scala
+@@ -278,7 +278,7 @@
+   val meta_hazard = RegInit(0.U(2.W))
+   when (meta_hazard =/= 0.U) { meta_hazard := meta_hazard + 1.U }
+   when (io.meta_write.fire) { meta_hazard := 1.U }
+-  io.probe_rdy := !idx_match || (!state.isOneOf(states_before_refill) && meta_hazard === 0.U)
++  io.probe_rdy := !idx_match || (!state.isOneOf(states_before_refill :+ s_meta_write_req) && meta_hazard === 0.U)
+ 
+   io.meta_write.valid := state.isOneOf(s_meta_write_req, s_meta_clear)
+   io.meta_write.bits.idx := req_idx

@@ -13,9 +13,13 @@ import sys
 def records(path):
     parsed = {key: [] for key in ("events", "poses", "probes", "summaries", "delays", "clocks",
               "diagnostics", "propagation", "placements", "platforms", "gpu_events", "gpu_results", "predictions",
-              "prediction_placements", "prediction_summaries", "warp_slots", "displays")}
+              "prediction_placements", "prediction_summaries", "warp_slots", "displays", "blas", "blas_work", "blas_memory", "blas_selftests", "vector_checks", "rvv_kernels", "gemmini", "gemmini_selftests", "gemmini_edges", "eye_configs", "eye_images", "eye_results", "eye_reads")}
     for number, raw in enumerate(Path(path).read_text(errors="replace").splitlines(), 1):
-        for prefix, key in (("ILLIXR_TRACE ", "events"), ("ILLIXR_POSE ", "poses"),
+        for prefix, key in (("ILLIXR_EYE_READ ", "eye_reads"), ("ILLIXR_EYE_CONFIG ", "eye_configs"), ("ILLIXR_EYE_IMAGE ", "eye_images"), ("ILLIXR_EYE_RESULT ", "eye_results"), ("ILLIXR_BLAS ", "blas"), ("ILLIXR_BLAS_WORK ", "blas_work"),
+                            ("ILLIXR_VECTOR_CHECK ", "vector_checks"), ("ILLIXR_RVV_KERNEL ", "rvv_kernels"),
+                            ("ILLIXR_GEMMINI ", "gemmini"), ("ILLIXR_GEMMINI_SELFTEST ", "gemmini_selftests"), ("ILLIXR_GEMMINI_EDGE ", "gemmini_edges"),
+                            ("ILLIXR_BLAS_MEMORY ", "blas_memory"), ("ILLIXR_BLAS_SELFTEST ", "blas_selftests"),
+                            ("ILLIXR_TRACE ", "events"), ("ILLIXR_POSE ", "poses"),
                             ("ILLIXR_PROBE ", "probes"), ("ILLIXR_RESULT ", "summaries"),
                             ("ILLIXR_DELAY ", "delays"), ("ILLIXR_CLOCK ", "clocks"),
                             ("ILLIXR_DIAGNOSTIC ", "diagnostics"), ("ILLIXR_PROPAGATION ", "propagation"),
@@ -172,7 +176,7 @@ def placement_checks(data, summary, harts, mode):
         "offline_cam": summary.get("cam_published"), "openvins": len(data["poses"])}
     if data["gpu_results"]:
         gpu = data["gpu_results"][0]
-        expected_work.update(render_loop=gpu.get("render_submitted"), timewarp=gpu.get("timewarp_submitted"))
+        expected_work.update(render_loop=gpu.get("render_submitted"), timewarp=len(data["eye_results"]) if data.get("eye_configs") and data["eye_configs"][0].get("version")==1 else gpu.get("timewarp_submitted"))
         expected_publications.update(render_loop=gpu.get("render_completed"), timewarp=gpu.get("timewarp_completed"))
     union_mask = 0
     for placement in placements:
@@ -236,7 +240,7 @@ def prediction_checks(data, gpu, events, harts, errors):
                 publications[publication] += 1
             mask = sum(1 << hart for hart in range(harts) if work[hart] or publications[hart])
             if (len(calls) != len(events[stage]) or placement.get("work_counts") != work or
-                    placement.get("publication_counts") != publications or placement.get("hart_mask") != mask or not mask):
+                    placement.get("publication_counts") != publications or placement.get("hart_mask") != mask or (not mask and not (data.get("eye_functionally_valid") and stage == "timewarp" and not calls))):
                 errors.append(f"{stage}: predictor placement differs from actual prediction calls")
             for call, event in zip(calls, events[stage]):
                 expected_status = {"valid": 0, "fallback": 1, "stale": 2, "invalid": 3}.get(event.get("prediction_status"))
@@ -403,6 +407,9 @@ def analyze(log, native=None, harts=None, require_initialized=False, require_asy
         return result
     summary = data["summaries"][0]
     result["summary"] = summary
+    from blas_analysis import check_blas
+    result["blas"], blas_errors = check_blas(data, harts or summary.get("online_harts", 1))
+    errors.extend(blas_errors)
     status = summary.get("status")
     result["clock"] = data["clocks"]
     result["platform"] = data["platforms"]
@@ -575,6 +582,12 @@ def analyze(log, native=None, harts=None, require_initialized=False, require_asy
         result["simulated_runtime_source"] = "last probe; final runtime absent in legacy trace"
     if dataset:
         result["trajectory_sanity"] = trajectory_sanity(poses, dataset)
+    if data.get("eye_configs") or data.get("eye_images") or data.get("eye_results"):
+        from eye_analysis import check as check_eye
+        result["eye_tracking"], eye_errors = check_eye(data, summary, harts or summary.get("online_harts", 1))
+        errors.extend(eye_errors)
+        data["eye_functionally_valid"] = not eye_errors
+        data["eye_legacy_synchronous"] = not eye_errors and data["eye_configs"][0].get("version")==1
     if require_gpu or data["gpu_results"] or data["gpu_events"]:
         result["gpu_pipeline"], gpu_errors = gpu_checks(data, summary, harts or summary.get("online_harts", 1))
         errors.extend(gpu_errors)

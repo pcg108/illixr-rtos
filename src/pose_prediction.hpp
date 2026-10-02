@@ -1,3 +1,4 @@
+#include "trace_output.hpp"
 #pragma once
 #include "latest_value.hpp"
 #include "prediction_policy.hpp"
@@ -65,7 +66,7 @@ public:
         for (std::size_t i = 0; i < trace_size_; ++i) {
             const auto& t = traces_[i];
             const auto& r = t.result;
-            std::printf("ILLIXR_PREDICTION {\"caller\":%u,\"status\":%u,\"processing_hart\":%u,"
+            trace_output::print("ILLIXR_PREDICTION {\"caller\":%u,\"status\":%u,\"processing_hart\":%u,"
                 "\"publication_hart\":%u,\"source_ns\":%lld,"
                 "\"source_seq\":%llu,\"computed_ns\":%lld,\"target_ns\":%lld,\"horizon_ns\":%lld,"
                 "\"input_seq\":%llu,\"input\":{\"timestamp_ns\":%lld,\"previous_timestamp_ns\":%lld,\"position\":",
@@ -75,30 +76,30 @@ public:
                 static_cast<long long>(r.computed_runtime_ns), static_cast<long long>(r.target_timestamp_ns),
                 static_cast<long long>(r.horizon_ns), static_cast<unsigned long long>(t.input_sequence),
                 static_cast<long long>(t.input.timestamp_ns), static_cast<long long>(t.input.previous_timestamp_ns));
-            vector(t.input.position); std::printf(",\"velocity\":"); vector(t.input.velocity);
-            std::printf(",\"orientation\":"); quaternion(t.input.orientation);
-            std::printf(",\"w_hat\":"); vector(t.input.w_hat);
-            std::printf(",\"a_hat\":"); vector(t.input.a_hat);
-            std::printf(",\"w_hat2\":"); vector(t.input.w_hat2);
-            std::printf(",\"a_hat2\":"); vector(t.input.a_hat2);
-            std::printf("},\"raw\":"); vector(t.raw);
-            std::printf(",\"position\":"); vector(r.position);
-            std::printf(",\"orientation\":"); quaternion(r.orientation);
-            std::printf(",\"offset\":"); quaternion(t.offset);
-            std::printf("}\n");
+            vector(t.input.position); trace_output::print(",\"velocity\":"); vector(t.input.velocity);
+            trace_output::print(",\"orientation\":"); quaternion(t.input.orientation);
+            trace_output::print(",\"w_hat\":"); vector(t.input.w_hat);
+            trace_output::print(",\"a_hat\":"); vector(t.input.a_hat);
+            trace_output::print(",\"w_hat2\":"); vector(t.input.w_hat2);
+            trace_output::print(",\"a_hat2\":"); vector(t.input.a_hat2);
+            trace_output::print("},\"raw\":"); vector(t.raw);
+            trace_output::print(",\"position\":"); vector(r.position);
+            trace_output::print(",\"orientation\":"); quaternion(r.orientation);
+            trace_output::print(",\"offset\":"); quaternion(t.offset);
+            trace_output::print("}\n");
         }
         for (unsigned caller = 0; caller < static_cast<unsigned>(PredictionConsumer::Count); ++caller) {
             const auto& placement = placements_[caller];
-            std::printf("ILLIXR_PREDICTION_PLACEMENT {\"caller\":%u,\"hart_mask\":%u,\"work_counts\":[",
+            trace_output::print("ILLIXR_PREDICTION_PLACEMENT {\"caller\":%u,\"hart_mask\":%u,\"work_counts\":[",
                 caller, placement.hart_mask);
             for (unsigned hart = 0; hart < CONFIG_MP_MAX_NUM_CPUS; ++hart)
-                std::printf("%s%llu", hart ? "," : "", static_cast<unsigned long long>(placement.work_counts[hart]));
-            std::printf("],\"publication_counts\":[");
+                trace_output::print("%s%llu", hart ? "," : "", static_cast<unsigned long long>(placement.work_counts[hart]));
+            trace_output::print("],\"publication_counts\":[");
             for (unsigned hart = 0; hart < CONFIG_MP_MAX_NUM_CPUS; ++hart)
-                std::printf("%s%llu", hart ? "," : "", static_cast<unsigned long long>(placement.publication_counts[hart]));
-            std::printf("]}\n");
+                trace_output::print("%s%llu", hart ? "," : "", static_cast<unsigned long long>(placement.publication_counts[hart]));
+            trace_output::print("]}\n");
         }
-        std::printf("ILLIXR_PREDICTION_SUMMARY {\"calls\":%llu,\"overflow\":%llu,\"invalid\":%llu,"
+        trace_output::print("ILLIXR_PREDICTION_SUMMARY {\"calls\":%llu,\"overflow\":%llu,\"invalid\":%llu,"
                     "\"max_horizon_ns\":%lld}\n",
             static_cast<unsigned long long>(trace_size_), static_cast<unsigned long long>(overflow_),
             static_cast<unsigned long long>(invalid_), static_cast<long long>(prediction_max_horizon_ns));
@@ -124,13 +125,13 @@ private:
         unsigned processing_hart{}, publication_hart{};
     };
     template<class Derived> static void vector(const Eigen::MatrixBase<Derived>& values) {
-        std::printf("[");
+        trace_output::print("[");
         for (Eigen::Index i = 0; i < values.size(); ++i)
-            std::printf("%s%.17g", i ? "," : "", static_cast<double>(values(i)));
-        std::printf("]");
+            trace_output::print("%s%.17g", i ? "," : "", static_cast<double>(values(i)));
+        trace_output::print("]");
     }
     template<class Scalar> static void quaternion(const Eigen::Quaternion<Scalar>& q) {
-        std::printf("[%.17g,%.17g,%.17g,%.17g]", static_cast<double>(q.w()),
+        trace_output::print("[%.17g,%.17g,%.17g,%.17g]", static_cast<double>(q.w()),
             static_cast<double>(q.x()), static_cast<double>(q.y()), static_cast<double>(q.z()));
     }
     k_mutex mutex_{};

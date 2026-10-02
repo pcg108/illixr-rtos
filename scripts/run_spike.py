@@ -72,14 +72,39 @@ def run(args, case):
         raise ValueError(f"Refusing to overwrite prior run artifacts in {directory}")
     spike = Path(args.spike).resolve()
     isa = case.get("isa", args.isa)
-    command = [str(spike), f"-p{harts}", "-m0x80000000:0x10000000", f"--isa={isa}", str(elf)]
+    limit = case.get("max_instructions", getattr(args, "max_instructions", 100_000_000_000))
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("max_instructions must be a positive integer")
+    extension = case.get("gemmini_extension", getattr(args, "gemmini_extension", None))
+    extra = []
+    named_extensions = case.get("named_extensions", [])
+    if named_extensions and extension:
+        raise ValueError("Select either named extensions or the legacy Gemmini extension")
+    if len({item['name'] for item in named_extensions}) != len(named_extensions):
+        raise ValueError("Spike extensions must have unique names")
+    loaded = set()
+    for item in named_extensions:
+        library = Path(item['library']).resolve(strict=True)
+        if str(library) not in loaded:
+            extra.append(f"--extlib={library}")
+            loaded.add(str(library))
+        extra.append("--extension=" + item['name'])
+    if extension:
+        extension = Path(extension).resolve(strict=True)
+        extra = [f"--extlib={extension}", "--extension=gemmini"]
+    command = [str(spike), *extra, f"-p{harts}", "-m0x80000000:0x10000000", f"--isa={isa}", f"--instructions={limit}", str(elf)]
     root = Path(__file__).resolve().parents[1]
     started = time.monotonic()
     metadata = {"started_utc": datetime.now(timezone.utc).isoformat(), "command": command,
                 "elf": str(elf), "elf_sha256": sha256(elf), "spike": str(spike),
                 "spike_sha256": sha256(spike), "repo_revision": git_revision(root),
                 "harts": harts, "isa": isa, "timeout_seconds": args.timeout, "case": case,
-                "default_simulated_clint": True}
+                "default_simulated_clint": True, "max_instructions": limit,
+                "limit_semantics": "Spike sim.step instruction budget; not cycle-accurate hardware cycles"}
+    if extension:
+        metadata["gemmini_extension"] = {"path":str(extension), "sha256":sha256(extension)}
+    if named_extensions:
+        metadata['named_extensions'] = [{**item, 'sha256': sha256(item['library'])} for item in named_extensions]
     source_diff = subprocess.run(["git", "-C", str(root), "diff", "--binary"], capture_output=True, check=True).stdout
     metadata["tracked_source_diff_sha256"] = hashlib.sha256(source_diff).hexdigest()
     sources = subprocess.run(["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -152,6 +177,13 @@ def run(args, case):
                      "final_result_seen": marker, "fatal": fatal, "fatal_markers": sorted(fatal_markers)})
     native_log = None
     native_failed = False
+    from trace_batches import decode_file
+    try:
+        metadata['trace_transfer'] = decode_file(log)
+    except (ValueError, UnicodeError) as error:
+        fatal = True
+        metadata['fatal'] = True
+        metadata['trace_transfer_error'] = str(error)
     if marker and not timed_out and not interrupted and not fatal and args.native and not case.get("expect_failure"):
         native_log = directory / "native.log"
         native_command = [str(Path(args.native).resolve()), "--dataset", str(Path(args.dataset).resolve()),
@@ -171,12 +203,22 @@ def run(args, case):
                          placement=case.get("placement"), require_gpu=case.get("require_gpu", False))
     except (OSError, ValueError) as error:
         result = {"passed": False, "errors": [str(error)]}
+    expected_backend = case.get("linalg_backend")
+    if case.get('require_eye') and result.get('eye_tracking', {}).get('passed') is not True:
+        result['errors'].append('Required eye inference validation missing or failed')
+    if expected_backend and result.get("blas", {}).get("backend") != expected_backend:
+        result["errors"].append("Runtime linear algebra backend differs from requested case")
+    if not marker:
+        metadata["completion_status"] = "incomplete"
     if timed_out:
         result["errors"].append("Host watchdog expired: validation is incomplete")
     if interrupted:
         result["errors"].append("Execution interrupted: validation is incomplete")
     if fatal:
-        result["errors"].append("Definitive Zephyr fatal marker observed: " + ", ".join(sorted(fatal_markers)))
+        if metadata.get('trace_transfer_error'):
+            result['errors'].append('Trace batch decoding failed: ' + metadata['trace_transfer_error'])
+        if fatal_markers:
+            result["errors"].append("Definitive Zephyr fatal marker observed: " + ", ".join(sorted(fatal_markers)))
     if native_failed:
         result["errors"].append("Native estimator replay failed; see native-console.log")
     if case.get("require_gpu") and marker and not timed_out and not interrupted and not fatal:
@@ -206,10 +248,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spike", default="/home/prashanth/chipyard/.conda-env/riscv-tools/bin/spike")
     parser.add_argument("--isa", default=DEFAULT_ISA)
+    parser.add_argument("--gemmini-extension", type=Path, help="Private FP32 Gemmini Spike extension")
     parser.add_argument("--elf")
     parser.add_argument("--harts", type=int, choices=(1, 2, 4))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--timeout", type=float, default=3600)
+    parser.add_argument("--timeout", type=float, default=86400)
+    parser.add_argument("--max-instructions", type=int, default=100_000_000_000)
     parser.add_argument("--dataset", default="/home/prashanth/illixr-headless-reference/data/mav0")
     parser.add_argument("--native")
     parser.add_argument("--prediction-native", type=Path, help="Independent desktop prediction/transform replay executable")

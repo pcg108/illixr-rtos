@@ -52,7 +52,30 @@ class DisplayScheduleTrace(unittest.TestCase):
         data=dict(gpu_results=[self.gpu],gpu_events=self.events,warp_slots=self.slots,displays=self.displays,
                   predictions=predictions,prediction_placements=placements,
                   prediction_summaries=[dict(calls=len(predictions),overflow=0,invalid=0,max_horizon_ns=50_000_000)])
+        data.update(getattr(self, 'extra_data', {}))
         return a.gpu_checks(data,dict(origin_ns=1_000_000_000,runtime_ns=40_000_000),2)
+
+    def test_validated_expired_eye_run_is_functional_but_misses_display(self):
+        self.events=self.events[:1]
+        self.gpu.update(timewarp_submitted=0,timewarp_completed=0,distinct_selected=0,
+            never_selected=1,repeated_uses=0,missed_opportunities=2,fresh_warp_completed=0,
+            new_outputs=0,repeated_outputs=0,no_outputs=4,fresh_on_time_presentations=0,
+            display_slots=4,timewarp_done_ns=3*self.P+1)
+        self.slots=self.slots[:1]+[dict(version=2,first_slot=2,last_slot=3,
+            scheduled_wake_ns=2*self.P-2_000_000,observed_ns=3*self.P+1,outcome='missed',final=True)]
+        self.displays=[dict(version=2,display_slot=i,boundary_ns=i*self.P,
+            observed_ns=4*self.P,observer_lateness_ns=(4-i)*self.P,warp_id=0,frame_id=0,
+            publication_ns=0,outcome='none',fresh_on_time=False,hart=0) for i in range(1,5)]
+        self.extra_data=dict(eye_functionally_valid=True,eye_legacy_synchronous=True,eye_results=[dict(final=True,expired=True)])
+        result,errors=self.check()
+        self.assertEqual(errors,[])
+        self.assertFalse(result['display_performance_passed'])
+
+    def test_async_eye_cannot_exempt_missing_presentations(self):
+        self.test_validated_expired_eye_run_is_functional_but_misses_display()
+        self.extra_data['eye_legacy_synchronous']=False
+        _,errors=self.check()
+        self.assertTrue(any('No fresh on-time modeled presentation' in e for e in errors))
 
     def reject(self,needle):
         _,errors=self.check()

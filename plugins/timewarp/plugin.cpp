@@ -2,6 +2,9 @@
 #include "../../src/plugin_registry.hpp"
 #include "../../src/threadloop.hpp"
 #include "transform.hpp"
+#ifdef ILLIXR_EYE_TRACKING
+#include "../../src/eye_tracking.hpp"
+#endif
 
 using namespace ILLIXR;
 namespace gpu = ILLIXR::gpu_pipeline;
@@ -12,7 +15,9 @@ class Timewarp final : public threadloop {
 public:
   explicit Timewarp(phonebook_new &pb)
       : threadloop{pb, "timewarp", timewarp_stack,
-                   K_THREAD_STACK_SIZEOF(timewarp_stack), 5,
+                   // Preserve the 1 ms scheduling margin under single-core
+                   // load. GPU waits still sleep and release the CPU.
+                   K_THREAD_STACK_SIZEOF(timewarp_stack), 4,
                    replay::requested_hart(replay::TIMEWARP_WORKER)} {}
 
 protected:
@@ -47,6 +52,11 @@ protected:
       return;
     }
     completion.warp_id = ++gpu::timewarp_submitted;
+#ifdef ILLIXR_EYE_TRACKING
+    // Retained eye prediction: startup may have none, and successive warps may
+    // reuse one. Eye inference does not participate in display scheduling.
+    (void)eye_tracking::read_latest(completion.warp_id, completion.display_slot);
+#endif
     completion.processing_hart = replay::hart_id();
     gpu::record_opportunity(completion.display_slot, completion.display_slot,
                             completion.actual_wake_ns, gpu::Opportunity::Submitted, completion.final);

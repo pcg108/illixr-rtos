@@ -1,3 +1,4 @@
+#include "trace_output.hpp"
 #pragma once
 #include "data_format.hpp"
 #include "latest_value.hpp"
@@ -118,19 +119,19 @@ inline void record_placement(Worker worker, bool publication = false) {
 inline void dump_placement() {
   for (unsigned worker = 0; worker < WORKER_COUNT; ++worker) {
     const auto &record = placements[worker];
-    printf("ILLIXR_PLACEMENT "
+    trace_output::print("ILLIXR_PLACEMENT "
            "{\"plugin\":\"%s\",\"requested_hart\":%d,\"hart_mask\":%u,\"work_"
            "counts\":[",
            worker_names[worker], requested_hart(static_cast<Worker>(worker)),
            record.hart_mask);
     for (unsigned hart = 0; hart < hart_count; ++hart)
-      printf("%s%llu", hart ? "," : "",
+      trace_output::print("%s%llu", hart ? "," : "",
              (unsigned long long)record.work_counts[hart]);
-    printf("],\"publication_counts\":[");
+    trace_output::print("],\"publication_counts\":[");
     for (unsigned hart = 0; hart < hart_count; ++hart)
-      printf("%s%llu", hart ? "," : "",
+      trace_output::print("%s%llu", hart ? "," : "",
              (unsigned long long)record.publication_counts[hart]);
-    printf("]}\n");
+    trace_output::print("]}\n");
   }
 }
 struct TraceEntry {
@@ -254,19 +255,19 @@ inline void dump_trace() {
   for (std::size_t i = 0; i < trace_size; ++i) {
     const auto &e = trace_entries[i];
     if (e.kind == 'I' || e.kind == 'C')
-      printf("ILLIXR_TRACE %s %llu\n", e.kind == 'I' ? "IMU" : "CAM",
+      trace_output::print("ILLIXR_TRACE %s %llu\n", e.kind == 'I' ? "IMU" : "CAM",
              (unsigned long long)e.index);
     else if (e.kind == 'P')
-      printf(
+      trace_output::print(
           "ILLIXR_POSE %llu %lld %.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
           (unsigned long long)e.index, (long long)e.time, e.pose[0], e.pose[1],
           e.pose[2], e.pose[3], e.pose[4], e.pose[5], e.pose[6]);
     else if (e.kind == 'D')
-      printf("ILLIXR_DELAY %s %lld %llu %llu %llu\n", e.index ? "BEGIN" : "END",
+      trace_output::print("ILLIXR_DELAY %s %lld %llu %llu %llu\n", e.index ? "BEGIN" : "END",
              (long long)e.time, (unsigned long long)e.fields[0],
              (unsigned long long)e.fields[1], (unsigned long long)e.fields[2]);
     else if (e.kind == 'R')
-      printf("ILLIXR_PROBE %lld %llu %llu %llu %llu %llu\n", (long long)e.time,
+      trace_output::print("ILLIXR_PROBE %lld %llu %llu %llu %llu %llu\n", (long long)e.time,
              (unsigned long long)e.index, (unsigned long long)e.fields[0],
              (unsigned long long)e.fields[1], (unsigned long long)e.fields[2],
              (unsigned long long)e.fields[3]);

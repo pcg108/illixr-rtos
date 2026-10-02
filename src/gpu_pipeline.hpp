@@ -1,7 +1,9 @@
+#include "trace_output.hpp"
 #pragma once
 #include "pose_prediction.hpp"
 #include "replay.hpp"
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #ifndef ILLIXR_RENDER_DELAY_NS
@@ -201,7 +203,7 @@ inline void publish_warp(Completion &completion, unsigned hart) {
 inline void observe_display_locked(int64_t now, unsigned hart) {
   int64_t end = now;
   if (atomic_get(&timewarp_done)) {
-    const int64_t final = boundary_at_or_after(warp_trace_size ? warp_trace[warp_trace_size-1].publication_ns : timewarp_done_ns);
+    const int64_t final = boundary_at_or_after(warp_trace_size ? std::max(warp_trace[warp_trace_size-1].publication_ns, timewarp_done_ns) : timewarp_done_ns);
     if (end > final) end = final;
   }
   while (vsync(next_display_slot) <= end && !replay::failed()) {
@@ -235,7 +237,7 @@ inline void observe_display(unsigned hart) {
 // Invoked only after worker joins. Normal EOS has one final closed-snapshot
 // opportunity (possibly empty), so this wait is bounded by one display period.
 inline void finish_presentation(unsigned hart) {
-  const int64_t end = boundary_at_or_after(warp_trace_size ? warp_trace[warp_trace_size-1].publication_ns : timewarp_done_ns);
+  const int64_t end = boundary_at_or_after(warp_trace_size ? std::max(warp_trace[warp_trace_size-1].publication_ns, timewarp_done_ns) : timewarp_done_ns);
   if (sleep_until(end)) observe_display(hart);
 }
 inline const char *status_name(PredictionStatus status) {
@@ -249,7 +251,7 @@ inline const char *status_name(PredictionStatus status) {
 }
 
 inline void print_prediction(const PredictionResult &prediction) {
-  printf("\"target_ns\":%lld,\"source_ns\":%lld,\"source_sequence\":%llu,"
+  trace_output::print("\"target_ns\":%lld,\"source_ns\":%lld,\"source_sequence\":%llu,"
          "\"prediction_status\":\"%s\",\"prediction_horizon_ns\":%lld,"
          "\"position\":[%.9g,%.9g,%.9g],\"orientation\":[%.9g,%.9g,%.9g,%.9g]",
          (long long)prediction.target_timestamp_ns, (long long)prediction.source_timestamp_ns,
@@ -262,22 +264,22 @@ inline void print_prediction(const PredictionResult &prediction) {
 
 
 inline void print_schedule(int64_t scheduled, int64_t actual, int64_t publication, unsigned processing, unsigned publishing) {
-  printf("\"scheduled_wake_ns\":%lld,\"actual_wake_ns\":%lld,\"publication_ns\":%lld,\"processing_hart\":%u,\"publication_hart\":%u,",
+  trace_output::print("\"scheduled_wake_ns\":%lld,\"actual_wake_ns\":%lld,\"publication_ns\":%lld,\"processing_hart\":%u,\"publication_hart\":%u,",
          (long long)scheduled, (long long)actual, (long long)publication, processing, publishing);
 }
 inline void dump() {
   for (std::size_t i=0; i<render_trace_size; ++i) {
     const auto &f = render_trace[i];
-    printf("ILLIXR_GPU_EVENT {\"version\":2,\"stage\":\"render\",\"frame_id\":%llu,\"slot\":%llu,"
+    trace_output::print("ILLIXR_GPU_EVENT {\"version\":2,\"stage\":\"render\",\"frame_id\":%llu,\"slot\":%llu,"
            "\"submit_ns\":%lld,\"scheduled_complete_ns\":%lld,\"observed_complete_ns\":%lld,\"presentation_ns\":%lld,\"hart\":%u,",
            (unsigned long long)f.frame_id,(unsigned long long)f.slot,(long long)f.submit_ns,
            (long long)f.scheduled_complete_ns,(long long)f.observed_complete_ns,(long long)f.presentation_ns,f.publication_hart);
     print_schedule(f.scheduled_wake_ns,f.actual_wake_ns,f.publication_ns,f.processing_hart,f.publication_hart);
-    print_prediction(f.prediction); printf("}\n");
+    print_prediction(f.prediction); trace_output::print("}\n");
   }
   for (std::size_t i=0; i<warp_trace_size; ++i) {
     const auto &c=warp_trace[i]; const auto &f=c.frame;
-    printf("ILLIXR_GPU_EVENT {\"version\":2,\"stage\":\"timewarp\",\"frame_id\":%llu,\"slot\":%llu,\"warp_id\":%llu,\"display_slot\":%llu,"
+    trace_output::print("ILLIXR_GPU_EVENT {\"version\":2,\"stage\":\"timewarp\",\"frame_id\":%llu,\"slot\":%llu,\"warp_id\":%llu,\"display_slot\":%llu,"
            "\"submit_ns\":%lld,\"scheduled_complete_ns\":%lld,\"observed_complete_ns\":%lld,\"presentation_ns\":%lld,\"hart\":%u,"
            "\"selection_ns\":%lld,\"frame_publication_ns\":%lld,\"frame_age_ns\":%lld,\"reused\":%s,\"final\":%s,"
            "\"render_source_sequence\":%llu,\"render_prediction_status\":\"%s\",\"render_orientation\":[%.9g,%.9g,%.9g,%.9g],",
@@ -287,26 +289,26 @@ inline void dump() {
            (unsigned long long)f.prediction.source_sequence,status_name(f.prediction.status),(double)f.prediction.orientation.w(),
            (double)f.prediction.orientation.x(),(double)f.prediction.orientation.y(),(double)f.prediction.orientation.z());
     print_schedule(c.scheduled_wake_ns,c.actual_wake_ns,c.publication_ns,c.processing_hart,c.publication_hart);
-    print_prediction(c.prediction); printf(",\"transform\":[");
-    for(int row=0;row<4;++row) for(int col=0;col<4;++col) printf("%s%.9g",row||col?",":"",(double)c.transform(row,col));
-    printf("]}\n");
+    print_prediction(c.prediction); trace_output::print(",\"transform\":[");
+    for(int row=0;row<4;++row) for(int col=0;col<4;++col) trace_output::print("%s%.9g",row||col?",":"",(double)c.transform(row,col));
+    trace_output::print("]}\n");
   }
   for (std::size_t i=0;i<opportunity_trace_size;++i) {
     const auto &o=opportunity_trace[i];
-    printf("ILLIXR_WARP_SLOT {\"version\":2,\"first_slot\":%llu,\"last_slot\":%llu,\"scheduled_wake_ns\":%lld,\"observed_ns\":%lld,\"outcome\":\"%s\",\"final\":%s}\n",
+    trace_output::print("ILLIXR_WARP_SLOT {\"version\":2,\"first_slot\":%llu,\"last_slot\":%llu,\"scheduled_wake_ns\":%lld,\"observed_ns\":%lld,\"outcome\":\"%s\",\"final\":%s}\n",
            (unsigned long long)o.first,(unsigned long long)o.last,(long long)warp_wake(o.first),(long long)o.observed_ns,
            o.outcome==Opportunity::Submitted?"submitted":o.outcome==Opportunity::Empty?"empty":"missed",o.final?"true":"false");
   }
   for (std::size_t i=0;i<display_trace_size;++i) {
     const auto &d=display_trace[i];
-    printf("ILLIXR_DISPLAY {\"version\":2,\"display_slot\":%llu,\"boundary_ns\":%lld,\"observed_ns\":%lld,\"observer_lateness_ns\":%lld,"
+    trace_output::print("ILLIXR_DISPLAY {\"version\":2,\"display_slot\":%llu,\"boundary_ns\":%lld,\"observed_ns\":%lld,\"observer_lateness_ns\":%lld,"
            "\"warp_id\":%llu,\"frame_id\":%llu,\"publication_ns\":%lld,\"outcome\":\"%s\",\"fresh_on_time\":%s,\"hart\":%u}\n",
            (unsigned long long)d.slot,(long long)vsync(d.slot),(long long)d.observed_ns,(long long)(d.observed_ns-vsync(d.slot)),
            (unsigned long long)d.warp_id,(unsigned long long)d.frame_id,(long long)d.publication_ns,
            !d.warp_id?"none":d.new_output?"new":"repeated",d.fresh_on_time?"true":"false",d.hart);
   }
-  printf("ILLIXR_GPU_RESULT {\"version\":2");
-#define GPU_COUNT(name) printf(",\"" #name "\":%llu", (unsigned long long)name)
+  trace_output::print("ILLIXR_GPU_RESULT {\"version\":2");
+#define GPU_COUNT(name) trace_output::print(",\"" #name "\":%llu", (unsigned long long)name)
   GPU_COUNT(render_submitted); GPU_COUNT(render_completed); GPU_COUNT(render_skipped_slots); GPU_COUNT(render_next_slot);
   GPU_COUNT(timewarp_submitted); GPU_COUNT(timewarp_completed); GPU_COUNT(distinct_selected); GPU_COUNT(repeated_uses);
   GPU_COUNT(empty_opportunities); GPU_COUNT(missed_opportunities);
@@ -315,7 +317,7 @@ inline void dump() {
   GPU_COUNT(trace_overflow); GPU_COUNT(render_closed_ns); GPU_COUNT(timewarp_done_ns);
   GPU_COUNT(render_delay_ns); GPU_COUNT(timewarp_delay_ns); GPU_COUNT(period_ns); GPU_COUNT(render_offset_ns); GPU_COUNT(timewarp_margin_ns);
 #undef GPU_COUNT
-  printf(",\"never_selected\":%llu,\"display_slots\":%llu,\"render_closed\":%s,\"timewarp_done\":%s}\n",
+  trace_output::print(",\"never_selected\":%llu,\"display_slots\":%llu,\"render_closed\":%s,\"timewarp_done\":%s}\n",
          (unsigned long long)(render_completed-distinct_selected),(unsigned long long)display_trace_size,
          atomic_get(&render_closed)?"true":"false",atomic_get(&timewarp_done)?"true":"false");
 }

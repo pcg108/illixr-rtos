@@ -1,0 +1,3 @@
+#include "rocket_single.overlay"
+&{/} { model = "Chipyard Rocket+Saturn"; };
+&{/cpus/cpu@0} { riscv,isa = "rv64gcv_zvl256b"; };

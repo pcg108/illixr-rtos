@@ -6,6 +6,10 @@ add_library(${PLUGIN_NAME} OBJECT
 
 )
 
+if(ILLIXR_DIAGNOSTIC_IMAGE_ADDRESS)
+  target_compile_definitions(${PLUGIN_NAME} PRIVATE ILLIXR_DIAGNOSTIC_IMAGE_ADDRESS=1)
+endif()
+
 target_compile_options(${PLUGIN_NAME} PRIVATE
   "SHELL:-include ${ILLIXR_HELPER_DIR}/opencv_helper.hpp"
   "SHELL:-include ${ILLIXR_HELPER_DIR}/eigen_lib_fix.hpp"

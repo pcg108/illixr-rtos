@@ -1,0 +1,12 @@
+{
+  "repeatable": true,
+  "valid": 1,
+  "x": 128.94616419919245,
+  "y": 111.9528936742934,
+  "foreground": 743,
+  "hash": "96ed2b1eb697a218",
+  "output_hash": 10875396086082019864,
+  "output_sha256": "98cfe8ad36ca79fbba5e7358906245458245864241580e88a58670b7715da877",
+  "sample_sha256": "746aa011f746d71e51bcac9ad808aeadb5e053cc3f3dfd79e97157ff433f4002",
+  "hardware_validated": false
+}

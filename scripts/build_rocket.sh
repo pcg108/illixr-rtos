@@ -69,6 +69,7 @@ cp "$build/zephyr/zephyr.elf" "$build/zephyr/.config" "$build/zephyr/zephyr.dts"
    "$generated/dataset_manifest.json" "$build/CMakeCache.txt" "$artifact/"
 "$size_tool" "$artifact/zephyr.elf" > "$artifact/size.txt"
 "$readelf_tool" -h -A "$artifact/zephyr.elf" > "$artifact/elf-attributes.txt"
+python "$repo/scripts/audit_blas.py" --build "$build" --artifact "$artifact" --nm "$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-nm"
 python "$repo/scripts/record_rocket_build.py" \
     --repo "$repo" --deps "$deps" --artifact "$artifact" --platform "$platform" \
     --harts "$harts" --placement "$placement" --preflight "$preflight" --modeled-clock-scale "$clock_scale"

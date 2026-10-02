@@ -1,0 +1,28 @@
+--- a/src/main/scala/mem/Mem.scala
++++ b/src/main/scala/mem/Mem.scala
+@@ -15,16 +15,23 @@
+   val ld_dep_mask = Vec(vParams.vliqEntries, Bool())
+   val st_dep_mask = Vec(vParams.vsiqEntries, Bool())
+ 
++  // The page is translated for the active slice, but base_offset remains the
++  // original instruction base. Include vstart/segstart before comparing a
++  // resumed slice on the next page. Keep the existing conservative upper bound.
++  def start_offset = (op.base_offset +
++    ((op.vstart * (op.seg_nf +& 1.U)) << op.elem_size) +
++    (op.segstart << op.elem_size))(pgIdxBits-1,0)
++
+   def containsBlock(addr: UInt) = {
+     val cl = addr(pgIdxBits-1,lgCacheBlockBytes)
+-    val base_cl = op.base_offset >> lgCacheBlockBytes
++    val base_cl = start_offset >> lgCacheBlockBytes
+     val bound_cl = bound_offset >> lgCacheBlockBytes
+     (((addr >> pgIdxBits) === op.page) && (base_cl <= cl && bound_cl >= cl)) || bound_all
+ 
+   }
+   def overlaps(other: LSIQEntry) = {
+     (op.page === other.op.page) && (bound_all || other.bound_all || (
+-      (op.base_offset <= other.bound_offset && bound_offset >= other.op.base_offset)
++      (start_offset <= other.bound_offset && bound_offset >= other.start_offset)
+     ))
+   }
+ }

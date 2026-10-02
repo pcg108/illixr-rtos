@@ -18,6 +18,12 @@ and an immutable simulator binary for each configuration. The manifest records
 hardware DTS and simulator hashes, hart IDs, ISA, memory, interrupts, and clock
 frequencies derived from generated hardware.
 
+The current firmware baseline models 1 GHz / 1 MHz with 10 kHz Zephyr ticks.
+`build_rocket.sh` applies a documented factor of two to both declared frequencies;
+the generated hardware and its verified 1000:1 ratio remain unchanged.
+`ILLIXR_MODELED_CLOCK_SCALE=1` selects the original generated clock interpretation.
+Prior firmware/results retain their recorded settings. See [clock experiments](clock-experiments.md).
+
 These standard configurations have 256 MiB RAM at `0x80000000`, a 500 kHz CLINT
 timer, and 500 MHz Rocket core clocks. The generated CPU DTS may contain a zero
 placeholder clock frequency; the hardware inspection resolves the core clock from

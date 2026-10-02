@@ -1,0 +1,18 @@
+flowchart LR
+  eye[offline_eye: one repeated image at 120 Hz] --> image[Retained latest eye image]
+  image --> worker[Independent eye_tracking worker on hart 0]
+  worker --> int8[custom2 INT8 RITNet]
+  int8 --> result[Retained latest completed eye prediction]
+  result -->|Snapshot: new, reused, or unavailable| warp[Timewarp: upcoming vsync minus 2 ms]
+  camera[offline_cam] --> vio[OpenVINS]
+  imu[offline_imu] --> vio
+  imu --> integrate[imu_integrator]
+  vio --> integrate
+  integrate --> prediction[Pose prediction service]
+  render[Render: vsync plus 1 ms] --> prediction
+  render --> frame[Retained latest completed frame]
+  frame --> warp
+  warp --> prediction
+  warp --> gpu[Modeled asynchronous warp GPU work]
+  gpu --> presentation[Main probe: modeled presentation at vsync]
+  vio -. optional FP32 BLAS .-> fp32[Hart 0 worker: custom3 FP32 Gemmini]

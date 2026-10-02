@@ -1,0 +1,14 @@
+--- a/src/main/scala/exu/Core.scala
++++ b/src/main/scala/exu/Core.scala
+@@ -887,7 +887,10 @@
+   for (t <- floatTypes) {
+     val tag = com_fp_divsqrt_ctrl.typeTagOut
+     val divSqrt = Module(new hardfloat.DivSqrtRecFN_small(t.exp, t.sig, 0))
+-    divSqrt.io.inValid := com_uops_reg(0).valid && tag === typeTag(t).U && com_fp_divsqrt_valid && !divSqrt_val
++    // A trapping, killed, or replayed instruction must not start the divider.
++    // Otherwise its untracked completion can overwrite an architectural FP
++    // register while the exception handler saves/restores the owning context.
++    divSqrt.io.inValid := com_retire(0) && tag === typeTag(t).U && com_fp_divsqrt_valid && !divSqrt_val
+     divSqrt.io.sqrtOp := com_fp_divsqrt_ctrl.sqrt
+     divSqrt.io.a := maxType.unsafeConvert(com_uops_reg(0).bits.fdivin.in1, t)
+     divSqrt.io.b := maxType.unsafeConvert(com_uops_reg(0).bits.fdivin.in2, t)

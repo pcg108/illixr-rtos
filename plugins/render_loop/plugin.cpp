@@ -11,7 +11,9 @@ class RenderLoop final : public threadloop {
 public:
   explicit RenderLoop(phonebook_new &pb)
       : threadloop{pb, "render_loop", render_loop_stack,
-                   K_THREAD_STACK_SIZEOF(render_loop_stack), 5,
+                   // Deadline-sensitive CPU submission/completion work must
+                   // preempt priority-5 camera/VIO work; IMU remains priority 3.
+                   K_THREAD_STACK_SIZEOF(render_loop_stack), 4,
                    replay::requested_hart(replay::RENDER_WORKER)} {}
 
 protected:

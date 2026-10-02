@@ -1,0 +1,29 @@
+{
+  "source": "/home/prashanth/gemmini_test",
+  "files": {
+    "ritnet.c": "18a53714da09486ff3ffd2e02ee22f2665d1cb5cf3d08daf9a074a72593a5408",
+    "ritnet.hpp": "40cc0b732f44cfa09e646c9f507d27be61c8d4b4c8b5b5753815d67414a351ed",
+    "ritnet.cpp": "baf018aa83dc5668e10bfa675cd3e0e12da7b80124f0094f84d3898a97273d68",
+    "ritnet_params.h": "026f4fd257d6c0f37cb7555599537ef6626fc95b57b2a972d8b8d1036b746be3",
+    "ritnet_weights.h": "c9cb145b0881df828d20d42c45ce5853e5459ffb6e471fbdaf6d4c9b59003fa3",
+    "ritnet_helpers.h": "3b64c9dbd7a786eb18f050f6f350b9c53e1ce05f29e16dc332a578058da7d44f",
+    "images.h": "746aa011f746d71e51bcac9ad808aeadb5e053cc3f3dfd79e97157ff433f4002",
+    "include/gemmini_params_fp32_2.h": "7bc3b59cfc6edd044d3c5d05b5963476d04735e27f3f2b67059ab6c9ea9199d6",
+    "include/gemmini_nn.h": "881078997fd9abbd6bec8cac2451830ffadd458c504cf417ebac0785e394a30f",
+    "include/gemmini_params_ee290_smallsp.h": "236ca3de2b788bbc3120c692ed729dbc8b39e794b9e2feb5d0852ef8aa2bfa66",
+    "include/gemmini_params_fp32.h": "1e7ed808676c687f3aae6387431620dd8f5a511cb18a1b5dce63b3710112ff20",
+    "include/gemmini_testutils.h": "ace675c5add6cfc78de07d2a4894c9fa894d8716f1865ea2712bb60dec2e1c40",
+    "include/rocc.h": "8466a225c7f14578679a2ef10619e810bdaacff3a7e66212d6d07fde849f3fcc",
+    "include/gemmini_params.h": "b56e2e464f26c6e3b93f08b4c1fc41fc1f8a4ba44057ab751101c4bdc25c3901",
+    "include/accumulator.h": "3a0dfd584a097225470be0a6f3661dc85630cc365f3a5efad1d81275dbed9447",
+    "include/gemmini.h": "03cfdadf69c09e59246e5ed74ad344d484f2a12920cb45f34c12c3ab203e30ce",
+    "include/translator.h": "42383d22d34be62e03772710740ecc385a706746ee11a1898e77e26776237857",
+    "include/character.h": "b92a6787b85e38d0887df6d7a8b93f0b119551890cb47ae048ad9bc0bc1f96b8",
+    "include/gemmini_params_ee290.h": "4e8a3abc47b9d9b007c8662e05c2edce381c27220e652c42854b35bd601180db",
+    "include/rerocc.h": "3970ca915c323570200a1bd15e7b81cc56846996badd1a68c97d5e90c1be3431",
+    "include/gemmini_counter.h": "5826242287784b9a383d45fdcb6791f8a1651d9d320a1a5f011585a9885b5669",
+    "rocc-software/src/xcustom.h": "9582eb00cee774e4680fde6408a0d607bba85196a0a4fd803f7b7ddd801aad69",
+    "rocc-software/LICENSE": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+  },
+  "note": "Original supplied sources; adapted library in port/. No source license invented."
+}

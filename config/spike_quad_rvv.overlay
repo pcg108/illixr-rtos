@@ -1,0 +1,5 @@
+#include "spike_quad.overlay"
+&{/cpus/cpu@0} { riscv,isa = "rv64gcv_zvl256b"; };
+&{/cpus/cpu@1} { riscv,isa = "rv64gcv_zvl256b"; };
+&{/cpus/cpu@2} { riscv,isa = "rv64gcv_zvl256b"; };
+&{/cpus/cpu@3} { riscv,isa = "rv64gcv_zvl256b"; };

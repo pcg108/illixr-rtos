@@ -1,3 +1,8 @@
+#include "blas_backend.hpp"
+#ifdef ILLIXR_EYE_TRACKING
+#include "eye_tracking.hpp"
+#endif
+#include "vector_check.hpp"
 #include "../plugins/imu_integrator/imu_integrator_queue.hpp"
 #include "../plugins/openvins/openvins_queues.hpp"
 #include "clock_check.hpp"
@@ -10,6 +15,7 @@
 #endif
 #include <cstdio>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log_ctrl.h>
 
 #ifndef ILLIXR_PLATFORM_CHECK_ONLY
 #define ILLIXR_PLATFORM_CHECK_ONLY 0
@@ -33,12 +39,25 @@ static void simulator_exit(int code) {
 }
 int main() {
   using namespace ILLIXR;
+  // Drain the deferred boot banner before emitting machine-readable records.
+  log_flush();
   replay::initialize();
 #if ILLIXR_GPU_PIPELINE
   gpu_pipeline::initialize();
 #endif
   const auto online_harts = clock_check::run();
   clock_check::platform(online_harts);
+#ifdef ILLIXR_DIAGNOSTIC_FPU_TRAP
+  extern bool image_fpu_trap_check_entry();
+  if (!image_fpu_trap_check_entry()) replay::fail("faulting FP divide modified its destination");
+#endif
+#ifdef ILLIXR_DIAGNOSTIC_IMAGE_ARITHMETIC
+  extern bool image_arithmetic_check_entry();
+  if (!image_arithmetic_check_entry()) replay::fail("image arithmetic preflight failed");
+#endif
+  blas_backend::initialize();
+  if (!vector_check::run()) replay::fail("vector context preflight failed");
+  if (!replay::failed() && !blas_backend::self_test()) replay::fail("BLAS self-test failed");
   if (ILLIXR_PLATFORM_CHECK_ONLY) {
     printf("ILLIXR_DIAGNOSTIC %s\n", replay::failure_reason);
     simulator_exit(replay::failed() ? 1 : 0);
@@ -72,6 +91,11 @@ int main() {
 #endif
     runtime_ns = clock.now_ns();
   }
+#ifdef ILLIXR_EYE_TRACKING
+  eye_tracking::shutdown();
+  if (get_global_relative_clock().is_started())
+    runtime_ns = get_global_relative_clock().now_ns();
+#endif
   // After every producer has joined it is safe to reclaim residual failure-path
   // records.
   CamMsg *cam = nullptr;
@@ -85,6 +109,7 @@ int main() {
     fail("IMU end-of-stream count mismatch");
   const auto &export_clock = get_global_relative_clock();
   const auto export_start_ns = export_clock.is_started() ? export_clock.now_ns() : 0;
+  trace_output::begin();
 #if ILLIXR_GPU_PIPELINE
   if (!get_pose_prediction().validate())
     fail("prediction validation failed");
@@ -92,10 +117,15 @@ int main() {
   get_pose_prediction().dump();
   gpu_pipeline::dump();
 #endif
+#ifdef ILLIXR_EYE_TRACKING
+  eye_tracking::dump();
+#endif
   dump_trace();
   dump_placement();
-  printf("ILLIXR_PROPAGATION {\"max_observed_position_norm_m\":%.17g}\n",
+  blas_backend::dump();
+  trace_output::print("ILLIXR_PROPAGATION {\"max_observed_position_norm_m\":%.17g}\n",
          max_observed_propagated_position_norm);
+  if (!trace_output::finish()) fail("batched trace export failed");
   const auto export_end_ns = export_clock.is_started() ? export_clock.now_ns() : 0;
   // Only fixed diagnostic strings enter this JSON. Exceptions are printed
   // separately.

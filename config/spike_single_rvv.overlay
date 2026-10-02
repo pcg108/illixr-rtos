@@ -1,0 +1,2 @@
+#include "spike_single.overlay"
+&{/cpus/cpu@0} { riscv,isa = "rv64gcv_zvl256b"; };

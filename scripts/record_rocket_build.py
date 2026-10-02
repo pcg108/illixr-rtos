@@ -107,7 +107,9 @@ def main():
                     str(args.repo), str(args.deps), str(args.artifact)], check=True)
     manifest_path = args.artifact / "build_manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["target"] = {"platform": "chipyard-rocket", "harts": args.harts,
+    family = "chipyard-shuttle-saturn" if "shuttle_saturn" in platform.get("config", "") else "chipyard-rocket"
+    manifest["target"] = {"platform": family, "harts": args.harts,
+                          "hardware_config": platform.get("config"),
                           "placement": args.placement, "platform_check_only": bool(args.preflight),
                           "timer_hz": platform["timer_hz"] * args.modeled_clock_scale,
                           "core_hz": platform["core_hz"] * args.modeled_clock_scale,
@@ -116,6 +118,17 @@ def main():
                           "generated_timer_hz": platform["timer_hz"],
                           "generated_core_hz": platform["core_hz"],
                           "hardware_dts_sha256": sha(args.artifact / "hardware.dts")}
+    if cache.get("ILLIXR_EYE_TRACKING_ENABLED", "OFF").upper() in true_values:
+        ritnet = args.repo / "third_party/ritnet"
+        source_hashes = {str(p.relative_to(args.repo)): sha(p) for p in (ritnet / "port").rglob("*") if p.is_file()}
+        source_hashes.update({str(p.relative_to(args.repo)): sha(p) for p in
+            (args.repo / "src/eye_tracking.cpp", args.repo / "src/eye_tracking.hpp",
+             args.repo / "plugins/offline_eye/plugin.cpp", args.repo / "plugins/eye_tracking/plugin.cpp")})
+        manifest["ritnet"] = {"enabled": True, "precision": "int8", "opcode": 2,
+            "accelerator_hart": 0, "array_dim": 16, "publication_hz": 120,
+            "params_sha256": sha(ritnet / "port/include/gemmini_params.h"),
+            "reference": json.loads((ritnet / "reference/manifest.json").read_text()),
+            "sources": source_hashes}
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 

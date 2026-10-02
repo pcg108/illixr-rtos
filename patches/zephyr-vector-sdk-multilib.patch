@@ -1,0 +1,14 @@
+diff --git a/cmake/compiler/gcc/target_riscv.cmake b/cmake/compiler/gcc/target_riscv.cmake
+index e50f6817..2f07080c 100644
+--- a/cmake/compiler/gcc/target_riscv.cmake
++++ b/cmake/compiler/gcc/target_riscv.cmake
+@@ -47,7 +47,8 @@ endif()
+ 
+ if (CONFIG_RISCV_ISA_EXT_V)
+     # do not enable in kernel mode, or gcc will generate auto-vectorized code in kernel
+-    string(CONCAT riscv_march ${riscv_march} "v")
++    # Keep the SDK scalar RV64 multilib: vector context uses explicit +v assembly.
++    # RVV OpenBLAS is compiled separately; never auto-vectorize kernel C.
+ endif()
+ 
+ if(CONFIG_RISCV_ISA_EXT_ZICSR)

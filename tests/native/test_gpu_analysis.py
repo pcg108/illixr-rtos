@@ -318,6 +318,14 @@ class PipelineReportMetrics(unittest.TestCase):
         self.assertIsNone(metrics['application_elapsed_cycles'])
         self.assertIsNone(metrics['firesim_total_target_cycles'])
 
+    def test_modeled_1ghz_uses_verified_ratio_for_application_cycles(self):
+        row = self.row('firesim-u250')
+        row['analysis']['platform'][0]['core_hz'] = 1_000_000_000
+        metrics = pipeline.report_metrics(row)
+        self.assertEqual(metrics['application_elapsed_cycles'], 10_199_384_000)
+        row['analysis']['platform'].append({'status': 'pass', 'ratio_checked': True, 'core_hz': 500_000_000})
+        self.assertIsNone(pipeline.report_metrics(row)['application_elapsed_cycles'])
+
     def test_unverified_firesim_clock_cannot_produce_derived_cycles(self):
         row = self.row('firesim-u250')
         row['analysis']['platform'][0]['ratio_checked'] = False

@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(illixr_rvv_trmm_regression)
+if(NOT EXISTS "${ILLIXR_OPENBLAS_ARCHIVE}")
+  message(FATAL_ERROR "Set ILLIXR_OPENBLAS_ARCHIVE to the RVV embedded archive")
+endif()
+target_sources(app PRIVATE main.cpp)
+target_link_libraries(app PRIVATE "${ILLIXR_OPENBLAS_ARCHIVE}")

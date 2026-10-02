@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(illixr_estimator_replay LANGUAGES CXX)
+project(illixr_estimator_replay LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -20,6 +20,17 @@ target_compile_definitions(estimator_replay PRIVATE EIGEN_DONT_PARALLELIZE EIGEN
 target_compile_options(estimator_replay PRIVATE -ffp-contract=off)
 
 enable_testing()
+add_executable(test_gemmini_packing test_gemmini_packing.cpp)
+target_compile_options(test_gemmini_packing PRIVATE -UNDEBUG -fsanitize=undefined,address)
+target_link_options(test_gemmini_packing PRIVATE -fsanitize=undefined,address)
+add_test(NAME gemmini_packing COMMAND test_gemmini_packing)
+add_executable(test_image_bounds test_image_bounds.cpp)
+target_include_directories(test_image_bounds PRIVATE "${ILLIXR_ROOT}/plugins/openvins" ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(test_image_bounds PRIVATE Eigen3::Eigen ${OpenCV_LIBS})
+target_compile_options(test_image_bounds PRIVATE -UNDEBUG -fsanitize=undefined,float-cast-overflow -fno-sanitize-recover=all)
+target_link_options(test_image_bounds PRIVATE -fsanitize=undefined,float-cast-overflow)
+add_test(NAME image_bounds COMMAND test_image_bounds)
+
 add_executable(test_imu_transport test_imu_transport.cpp)
 target_include_directories(test_imu_transport PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/stubs" "${ILLIXR_ROOT}/src")
@@ -42,3 +53,13 @@ target_compile_definitions(prediction_reference PRIVATE EIGEN_DONT_VECTORIZE EIG
 target_compile_options(prediction_reference PRIVATE -ffp-contract=off)
 add_test(NAME prediction_reference_validation
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_prediction_reference.py")
+
+add_test(NAME eye_analysis COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_eye_analysis.py")
+add_test(NAME ritnet_routing COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_ritnet_routing.py")
+add_test(NAME ritnet_checkpoints COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_ritnet_checkpoints.py")
+add_executable(test_ritnet_decode "${ILLIXR_ROOT}/tests/ritnet/test_decode.c"
+  "${ILLIXR_ROOT}/third_party/ritnet/port/decode.c")
+target_include_directories(test_ritnet_decode PRIVATE "${ILLIXR_ROOT}/third_party/ritnet/port")
+target_compile_options(test_ritnet_decode PRIVATE -UNDEBUG -fsanitize=undefined,address)
+target_link_options(test_ritnet_decode PRIVATE -fsanitize=undefined,address)
+add_test(NAME ritnet_decode COMMAND test_ritnet_decode)

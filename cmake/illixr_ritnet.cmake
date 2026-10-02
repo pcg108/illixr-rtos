@@ -1,0 +1,22 @@
+# The INT8 API lives in a private C translation unit. Never expose its Gemmini
+# typedefs/macros to FP32 OpenBLAS or Eigen translation units.
+set(ritnet_port "${CMAKE_CURRENT_LIST_DIR}/../third_party/ritnet/port")
+add_library(illixr_ritnet STATIC "${ritnet_port}/ritnet.c" "${ritnet_port}/decode.c")
+target_include_directories(illixr_ritnet PRIVATE "${ritnet_port}")
+target_compile_definitions(illixr_ritnet PRIVATE BAREMETAL=1)
+target_compile_options(illixr_ritnet PRIVATE -Wno-incompatible-pointer-types -fno-fast-math)
+target_link_libraries(illixr_ritnet PRIVATE zephyr_interface)
+target_link_libraries(app PRIVATE illixr_ritnet)
+
+option(ILLIXR_RITNET_DIAGNOSTICS "Record opt-in RITNet operation checkpoints" OFF)
+set(ILLIXR_RITNET_DIAGNOSTIC_REFERENCE "" CACHE PATH "CPU checkpoint reference directory")
+if(ILLIXR_RITNET_DIAGNOSTICS)
+  if(NOT EXISTS "${ILLIXR_RITNET_DIAGNOSTIC_REFERENCE}/ritnet_diagnostic_expected.h")
+    message(FATAL_ERROR "RITNet diagnostics require a generated checkpoint reference")
+  endif()
+  target_sources(illixr_ritnet PRIVATE "${ritnet_port}/diagnostics.c")
+  target_include_directories(illixr_ritnet PRIVATE "${ILLIXR_RITNET_DIAGNOSTIC_REFERENCE}")
+  target_compile_definitions(illixr_ritnet PRIVATE RITNET_DIAGNOSTICS=1 RITNET_DIAG_EXPECTED=1)
+  target_compile_definitions(app PRIVATE RITNET_DIAGNOSTICS=1)
+  target_sources(app PRIVATE "${ritnet_port}/../../../src/ritnet_diagnostics.cpp")
+endif()

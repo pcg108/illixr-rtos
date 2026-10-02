@@ -48,9 +48,11 @@ cmake -S "$repo" -B "$build" -G Ninja \
     -DILLIXR_VIO_DELAY_MS=0 -DILLIXR_VIO_DELAY_AFTER_CAM=1 "$@"
 if [[ "${ILLIXR_CONFIGURE_ONLY:-0}" == 1 ]]; then exit 0; fi
 cmake --build "$build" --parallel "${ILLIXR_BUILD_JOBS:-6}"
+generated=$(python -c 'import sys; from pathlib import Path; print(next(line.split("=",1)[1] for line in Path(sys.argv[1]).read_text().splitlines() if line.startswith("ILLIXR_DATA_INCLUDE_DIR:PATH=")))' "$build/CMakeCache.txt")
 mkdir -p "$artifact"
 cp "$build/zephyr/zephyr.elf" "$build/zephyr/.config" "$build/zephyr/zephyr.dts" \
-   "$build/generated/dataset_manifest.json" "$build/CMakeCache.txt" "$artifact/"
+   "$generated/dataset_manifest.json" "$build/CMakeCache.txt" "$artifact/"
 "$size_tool" "$artifact/zephyr.elf" > "$artifact/size.txt"
+python "$repo/scripts/audit_blas.py" --build "$build" --artifact "$artifact" --nm "$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-nm"
 python "$repo/scripts/record_spike_build.py" "$repo" "$deps" "$artifact"
 printf 'ELF: %s/zephyr.elf\n' "$artifact"

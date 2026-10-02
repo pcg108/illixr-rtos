@@ -1,5 +1,7 @@
 # Quad-core FireSim clock experiments
 
+The combined **1 GHz / 10 kHz** default is now validated; see the [current baseline report](current-baseline.md). The results below preserve the two independent experiments that preceded it.
+
 Two independent changes are compared with the accepted OpenGL-style scheduling baseline. Application C/C++, estimator/prediction math, dataset, queue capacities, display schedule, GPU delays, and scheduler-managed placement are identical.
 
 | Case | Modeled CPU | Declared `mtime` frequency | Zephyr ticks/s | Timeout resolution |

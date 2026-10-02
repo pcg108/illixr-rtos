@@ -87,6 +87,21 @@ class PredictionReferenceTests(unittest.TestCase):
         del records[0]
         self.assertFalse(self.analyze(records)['passed'])
 
+    def test_all_expired_eye_requests_report_unexercised_transforms(self):
+        records = self.records()[:-1]
+        records += [('ILLIXR_EYE_CONFIG', dict(enabled=True, synchronous=True)),
+                    ('ILLIXR_EYE_RESULT', dict(expired=True, warp_id=0))]
+        result = self.analyze(records)
+        self.assertTrue(result['passed'], result['errors'])
+        self.assertEqual(result['transforms_compared'], 0)
+        self.assertIn('not exercised', result['transform_coverage'])
+
+    def test_nonexpired_eye_request_still_requires_transform(self):
+        records = self.records()[:-1]
+        records += [('ILLIXR_EYE_CONFIG', dict(enabled=True, synchronous=True)),
+                    ('ILLIXR_EYE_RESULT', dict(expired=False, warp_id=1))]
+        self.assertFalse(self.analyze(records)['passed'])
+
     def test_rejects_stale_not_frozen(self):
         records = self.records()
         stale = copy.deepcopy(records[0][1])
