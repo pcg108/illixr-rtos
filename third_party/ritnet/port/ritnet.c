@@ -151,6 +151,8 @@ tiled_matmul_auto(38400, 1, 1,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -199,6 +201,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block1_conv1_params.pool_stride, 
         /* pool_padding */      down_block1_conv1_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -228,6 +232,8 @@ tiled_matmul_auto(down_block1_conv21_params.I, down_block1_conv21_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -277,6 +283,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block1_conv22_params.pool_stride, 
         /* pool_padding */      down_block1_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -309,6 +317,8 @@ tiled_resadd_auto(38400, 65,
         down_block1_concat2_temp,
         false,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -334,6 +344,8 @@ tiled_matmul_auto(38400, 1, 1,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -367,6 +379,8 @@ tiled_matmul_auto(down_block1_conv31_params.I, down_block1_conv31_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -418,6 +432,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block1_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -455,6 +471,8 @@ tiled_conv_dw_auto(
         /* bias */              NULL, 
         /* output */            down_block1_conv32_avg_pool, 
         /* activation */ NO_ACTIVATION, /* scale */ db1_conv32_y_scale*0.25/db2_conv1_x_scale, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -486,6 +504,8 @@ tiled_conv_dw_auto(
         /* bias */              NULL, 
         /* output */            down_block1_conv32_avg_pool_2, 
         /* activation */ NO_ACTIVATION, /* scale */ db1_conv32_y_scale*0.25/db2_conv21_x_scale, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -521,6 +541,8 @@ tiled_matmul_auto(down_block2_conv1_params.I, down_block2_conv1_params.J, down_b
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -568,6 +590,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block2_conv1_params.pool_stride, 
         /* pool_padding */      down_block2_conv1_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -597,6 +621,8 @@ tiled_matmul_auto(down_block2_conv21_params.I, down_block2_conv21_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -646,6 +672,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block2_conv22_params.pool_stride, 
         /* pool_padding */      down_block2_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -676,6 +704,8 @@ tiled_resadd_auto(9600, 96,
         down_block2_concat2_temp,
         false,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -735,6 +765,8 @@ tiled_matmul_auto(down_block2_conv31_params.I, down_block2_conv31_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -786,6 +818,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block2_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -838,6 +872,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block2_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -890,6 +926,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block3_conv1_params.pool_stride, 
         /* pool_padding */      down_block3_conv1_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -919,6 +957,8 @@ tiled_matmul_auto(down_block3_conv21_params.I, down_block3_conv21_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -967,6 +1007,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block2_conv22_params.pool_stride, 
         /* pool_padding */      down_block2_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1000,6 +1042,8 @@ tiled_matmul_auto(down_block3_conv31_params.I, down_block3_conv31_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1051,6 +1095,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block3_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1103,6 +1149,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block3_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1156,6 +1204,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block4_conv1_params.pool_stride, 
         /* pool_padding */      down_block4_conv1_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1185,6 +1235,8 @@ tiled_matmul_auto(down_block4_conv21_params.I, down_block4_conv21_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1233,6 +1285,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block4_conv22_params.pool_stride, 
         /* pool_padding */      down_block4_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1266,6 +1320,8 @@ tiled_matmul_auto(down_block4_conv31_params.I, down_block4_conv31_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1317,6 +1373,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block4_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1369,6 +1427,8 @@ tiled_conv_stride_auto(
         /* pool_padding */  down_block4_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1422,6 +1482,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block5_conv1_params.pool_stride, 
         /* pool_padding */      down_block5_conv1_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1451,6 +1513,8 @@ tiled_matmul_auto(down_block5_conv21_params.I, down_block5_conv21_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1499,6 +1563,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       down_block5_conv22_params.pool_stride, 
         /* pool_padding */      down_block5_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1532,6 +1598,8 @@ tiled_matmul_auto(down_block5_conv31_params.I, down_block5_conv31_params.J, down
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1580,6 +1648,8 @@ tiled_conv_auto(
         /* pool_padding */  down_block5_conv32_params.pool_padding,
 
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1625,6 +1695,8 @@ tiled_conv_auto(
         /* bias */              z_bias, 
         /* output */            up_block1_upsize, 
         /* activation */        NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1656,6 +1728,8 @@ tiled_conv_dw_auto(
         /* bias */              z_bias, 
         /* output */            up_block1_upsample, 
         /* activation */ NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1681,6 +1755,8 @@ tiled_matmul_auto(600, 32, 32,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1712,6 +1788,8 @@ tiled_matmul_auto(up_block1_conv11_params.I, up_block1_conv11_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1762,6 +1840,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       up_block1_conv12_params.pool_stride, 
         /* pool_padding */      up_block1_conv12_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1796,6 +1876,8 @@ tiled_matmul_auto(up_block1_conv21_params.I, up_block1_conv21_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1843,6 +1925,8 @@ tiled_conv_auto(
         /* pool_stride */       up_block1_conv22_params.pool_stride, 
         /* pool_padding */      up_block1_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1885,6 +1969,8 @@ tiled_conv_auto(
         /* bias */              z_bias, 
         /* output */            up_block2_upsize, 
         /* activation */        NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1916,6 +2002,8 @@ tiled_conv_dw_auto(
         /* bias */              z_bias, 
         /* output */            up_block2_upsample, 
         /* activation */ NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1941,6 +2029,8 @@ tiled_matmul_auto(2400, 32, 32,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -1971,6 +2061,8 @@ tiled_matmul_auto(up_block2_conv11_params.I, up_block2_conv11_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2020,6 +2112,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       up_block2_conv12_params.pool_stride, 
         /* pool_padding */      up_block2_conv12_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2053,6 +2147,8 @@ tiled_matmul_auto(up_block2_conv21_params.I, up_block2_conv21_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2100,6 +2196,8 @@ tiled_conv_auto(
         /* pool_stride */       up_block2_conv22_params.pool_stride, 
         /* pool_padding */      up_block2_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2142,6 +2240,8 @@ tiled_conv_auto(
         /* bias */              z_bias, 
         /* output */            up_block3_upsize, 
         /* activation */        NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2173,6 +2273,8 @@ tiled_conv_dw_auto(
         /* bias */              z_bias, 
         /* output */            up_block3_upsample, 
         /* activation */ NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2198,6 +2300,8 @@ tiled_matmul_auto(9600, 32, 32,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2229,6 +2333,8 @@ tiled_matmul_auto(up_block3_conv11_params.I, up_block3_conv11_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2278,6 +2384,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       up_block3_conv12_params.pool_stride, 
         /* pool_padding */      up_block3_conv12_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2311,6 +2419,8 @@ tiled_matmul_auto(up_block3_conv21_params.I, up_block3_conv21_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2358,6 +2468,8 @@ tiled_conv_auto(
         /* pool_stride */       up_block3_conv22_params.pool_stride, 
         /* pool_padding */      up_block3_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2400,6 +2512,8 @@ tiled_conv_auto(
         /* bias */              z_bias, 
         /* output */            up_block4_upsize, 
         /* activation */        NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2431,6 +2545,8 @@ tiled_conv_dw_auto(
         /* bias */              z_bias, 
         /* output */            up_block4_upsample, 
         /* activation */ NO_ACTIVATION, /* scale */ 1, /* pool_size */ 1, /* pool_stride */ 1, /* pool_padding */ 0, tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2456,6 +2572,8 @@ tiled_matmul_auto(38400, 32, 32,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2486,6 +2604,8 @@ tiled_matmul_auto(up_block4_conv11_params.I, up_block4_conv11_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2535,6 +2655,8 @@ tiled_conv_stride_auto(
         /* pool_stride */       up_block4_conv12_params.pool_stride, 
         /* pool_padding */      up_block4_conv12_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2568,6 +2690,8 @@ tiled_matmul_auto(up_block4_conv21_params.I, up_block4_conv21_params.J, up_block
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2615,6 +2739,8 @@ tiled_conv_auto(
         /* pool_stride */       up_block4_conv22_params.pool_stride, 
         /* pool_padding */      up_block4_conv22_params.pool_padding,
         tiled_matmul_type);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }
@@ -2647,6 +2773,8 @@ tiled_matmul_auto(out_conv_params.I, out_conv_params.J, out_conv_params.K,
         false, false,
         0,
         RITNET_EXECUTION_TYPE);
+/* Complete this operation before the next tensor consumer or buffer reuse. */
+gemmini_fence();
 #ifdef RITNET_DIAGNOSTICS
       if(rd_end()) return -3;
     }

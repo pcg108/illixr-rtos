@@ -122,8 +122,13 @@ void shutdown() {
 void dump() {
 #ifdef RITNET_DIAGNOSTICS
  ritnet_diagnostics::dump();
+ const bool diagnostics = true;
+ const unsigned inference_limit = ritnet_diag_inferences;
+#else
+ const bool diagnostics = false;
+ const unsigned inference_limit = 0; // No diagnostic cap; normal end-of-stream controls shutdown.
 #endif
- trace_output::print("ILLIXR_EYE_CONFIG {\"version\":2,\"enabled\":true,\"hz\":120,\"width\":240,\"height\":160,\"precision\":\"int8\",\"opcode\":2,\"accelerator_hart\":0,\"synchronous\":false,\"workspace_bytes\":%zu,\"publications\":%u,\"requests\":%u,\"reads\":%u}\n",ritnet_workspace_size(),publication_count,record_count,read_count);
+ trace_output::print("ILLIXR_EYE_CONFIG {\"version\":2,\"enabled\":true,\"hz\":120,\"width\":240,\"height\":160,\"precision\":\"int8\",\"opcode\":2,\"accelerator_hart\":0,\"synchronous\":false,\"completion_fence_policy\":\"every_operation\",\"completion_fences_per_inference\":64,\"diagnostics\":%s,\"inference_limit\":%u,\"workspace_bytes\":%zu,\"publications\":%u,\"requests\":%u,\"reads\":%u}\n",diagnostics?"true":"false",inference_limit,ritnet_workspace_size(),publication_count,record_count,read_count);
  for(unsigned i=0;i<publication_count;i++) {
   const auto &p=publications[i];
   trace_output::print("ILLIXR_EYE_IMAGE {\"sequence\":%llu,\"scheduled_ns\":%lld,\"published_ns\":%lld,\"hart\":%u}\n",(unsigned long long)p.sequence,(long long)p.scheduled_ns,(long long)p.published_ns,p.publication_hart);

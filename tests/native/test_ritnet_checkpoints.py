@@ -1,9 +1,25 @@
 import copy,ctypes,json,subprocess,sys,tempfile,unittest
 from pathlib import Path
 R=Path(__file__).resolve().parents[2];sys.path.insert(0,str(R/'scripts'))
-from instrument_ritnet import calls
+from instrument_ritnet import calls,check_coverage
 from analyze_ritnet_checkpoints import analyze
 from run_ritnet_diagnostics import narrow, execution_is_incomplete
+class ProductionCompletion(unittest.TestCase):
+ def test_missing_or_diagnostic_only_fence_rejected(self):
+  port=R/'third_party/ritnet/port'
+  source=(port/'ritnet.c').read_text();catalog=json.loads((port/'diagnostic_operations.json').read_text())
+  self.assertEqual(check_coverage(source,catalog),64)
+  for _,end,_,_ in calls(source):
+   fence=source.index('gemmini_fence();',end)
+   for replacement in ('', '#ifdef RITNET_DIAGNOSTICS\ngemmini_fence();\n#endif'):
+    with self.assertRaisesRegex(AssertionError,'unconditional operation fence'):
+     check_coverage(source[:fence]+replacement+source[fence+len('gemmini_fence();'):],catalog)
+ def test_changed_graph_arguments_rejected(self):
+  port=R/'third_party/ritnet/port'
+  source=(port/'ritnet.c').read_text();catalog=json.loads((port/'diagnostic_operations.json').read_text())
+  catalog[0]['arguments'][0]='invalid'
+  with self.assertRaisesRegex(AssertionError,'Graph call changed'):check_coverage(source,catalog)
+
 class DiagnosticTermination(unittest.TestCase):
  def test_complete_numerical_failure_is_evidence(self):
   self.assertFalse(execution_is_incomplete({'fatal_markers':['*** FAILED ***'],'returncode':-15},{'complete':True}))

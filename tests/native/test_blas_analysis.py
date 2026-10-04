@@ -58,4 +58,19 @@ class BlasEvidenceTests(unittest.TestCase):
   d=self.gemmini_fixture();d['gemmini'][5].update(submissions=0,accelerator_hart_mask=0);self.assertTrue(check_blas(d,4)[1])
  def test_gemmini_arena_overflow(self):
   d=self.gemmini_fixture();d['gemmini'][0]['scratch_high_water']=33*1024*1024;self.assertTrue(check_blas(d,4)[1])
+ def packing_fixture(self):
+  d=self.gemmini_fixture()
+  d['gemmini_packing']=[dict(phase=g['phase'],name=g['name'],implementation='rvv',pack_elements=48,unpack_elements=16,pack_cycles=30,unpack_cycles=10,pack_read_bytes=48*(8 if g['name'].startswith('d') else 4),pack_write_bytes=192,unpack_read_bytes=64,unpack_write_bytes=16*(8 if g['name'].startswith('d') else 4),vector_calls=1,hart_mask=1) for g in d['gemmini']]
+  return d
+ def test_packing_evidence(self):self.assertEqual(check_blas(self.packing_fixture(),4)[1],[])
+ def test_packing_rejects_corrupt_counters(self):
+  for key,value in [('pack_cycles',-1),('unpack_read_bytes',128),('vector_calls',0),('hart_mask',2),('pack_write_bytes',0)]:
+   with self.subTest(key=key):
+    d=self.packing_fixture();d['gemmini_packing'][0][key]=value;self.assertTrue(check_blas(d,4)[1])
+ def test_packing_duplicate(self):
+  d=self.packing_fixture();d['gemmini_packing'][1]=d['gemmini_packing'][0];self.assertTrue(check_blas(d,4)[1])
+ def test_packing_legacy_counts_only(self):
+  d=self.packing_fixture()
+  d['gemmini_packing']=[{k:r[k] for k in ('phase','name','implementation','pack_elements','unpack_elements')} for r in d['gemmini_packing']]
+  self.assertEqual(check_blas(d,4)[1],[])
 if __name__=='__main__': unittest.main()

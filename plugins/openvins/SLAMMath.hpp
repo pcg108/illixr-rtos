@@ -358,6 +358,9 @@ public:
     
     bool is_initialized() const { return initialized_; }
     const IMUState& get_state() const { return state_; }
+#ifdef ILLIXR_ESTIMATOR_REPLAY
+    const auto& replay_features() const { return feature_tracks_; }
+#endif
     
 private:
     VIOConfig config_;

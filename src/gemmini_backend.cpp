@@ -1,5 +1,8 @@
 #include "gemmini_backend.hpp"
 #include "gemmini_packing.hpp"
+#ifdef ILLIXR_GEMMINI_PACKING_RVV
+#include "gemmini_packing_vector.hpp"
+#endif
 #include "replay.hpp"
 #include "trace_output.hpp"
 #include <zephyr/kernel.h>
@@ -27,9 +30,11 @@ struct Stats {
  uint64_t caller_harts[4]{};
  size_t high_water=0,max_m=0,max_n=0,max_k=0;
  unsigned accelerator_mask=0;
+ uint64_t packing_elements=0,unpacking_elements=0,pack_cycles=0,unpack_cycles=0,pack_read_bytes=0,pack_write_bytes=0,unpack_write_bytes=0,vector_calls=0;
 } stats[4];
 uint64_t submitted=0;
 uint64_t now() { return k_cycle_get_64(); }
+uint64_t core_cycles() { uint64_t value;asm volatile("rdcycle %0":"=r"(value)::"memory");return value; }
 uint64_t ns(uint64_t ticks) { return k_cyc_to_ns_floor64(ticks); }
 [[noreturn]] void fail(const char *reason) {
  printf("ILLIXR_GEMMINI_ERROR %s\n",reason); k_panic(); __builtin_unreachable();
@@ -43,7 +48,24 @@ void run(void*,void*,void*) {
   auto &s=stats[r.operation];
   const auto start=now(); s.queue_ns+=ns(start-submitted);
   float *a=storage,*b=a+r.m*r.k,*c=b+r.k*r.n;
+  const auto pack_cycle_start=core_cycles();
+#ifdef ILLIXR_GEMMINI_PACKING_RVV
+#ifdef ILLIXR_GEMMINI_PACKING_CONTIGUOUS
+  constexpr auto traversal=Traversal::source_contiguous;
+#else
+  constexpr auto traversal=Traversal::rows;
+#endif
+  if(r.is_double) pack_vector<double>(r,a,b,c,traversal); else pack_vector<float>(r,a,b,c,traversal);
+#else
   if(r.is_double) pack<double>(r,a,b,c); else pack<float>(r,a,b,c);
+#endif
+  s.pack_cycles+=core_cycles()-pack_cycle_start;
+  s.packing_elements+=r.m*r.k+r.k*r.n+r.m*r.n;
+  s.pack_read_bytes+=(r.m*r.k+r.k*r.n+(r.beta==0?0:r.m*r.n))*(r.is_double?8:4);
+  s.pack_write_bytes+=(r.m*r.k+r.k*r.n+r.m*r.n)*4;
+#ifdef ILLIXR_GEMMINI_PACKING_RVV
+  ++s.vector_calls;
+#endif
   const auto packed=now(); s.pack_ns+=ns(packed-start);
   uint64_t cycle0,cycle1;
   asm volatile("rdcycle %0":"=r"(cycle0));
@@ -57,7 +79,15 @@ void run(void*,void*,void*) {
   asm volatile("rdcycle %0":"=r"(cycle1));
   const auto executed=now(); s.execute_ns+=ns(executed-packed); s.cycles+=cycle1-cycle0;
   ++s.submissions; s.accelerator_mask|=1u<<replay::hart_id();
+  const auto unpack_cycle_start=core_cycles();
+#ifdef ILLIXR_GEMMINI_PACKING_RVV
+  if(r.is_double) unpack_vector<double>(r,c,traversal); else unpack_vector<float>(r,c,traversal);
+#else
   if(r.is_double) unpack<double>(r,c); else unpack<float>(r,c);
+#endif
+  s.unpack_cycles+=core_cycles()-unpack_cycle_start;
+  s.unpacking_elements+=r.m*r.n;
+  s.unpack_write_bytes+=r.m*r.n*(r.is_double?8:4);
   s.unpack_ns+=ns(now()-executed);
   k_sem_give(&done);
  }
@@ -95,9 +125,13 @@ void shutdown() {
  if(k_thread_join(&worker,K_SECONDS(1))) fail("worker shutdown timeout");
 }
 void dump(const char *phase,bool reset) {
+#ifdef ILLIXR_PACKING_SATURN_COMPAT
+ trace_output::print("ILLIXR_PACKING_COMPAT {\"phase\":\"%s\",\"scalar_rmm_calls_total\":%llu,\"scalar_rmm_elements_total\":%llu,\"conversion_return_fence\":true}\n",phase,illixr_pack_rmm_calls(),illixr_pack_rmm_elements());
+#endif
  const char *names[]={"sgemm","dgemm","sgemv","dgemv"};
  for(unsigned i=0;i<4;++i) {
   const auto &s=stats[i];
+  trace_output::print("ILLIXR_GEMMINI_PACKING {\"phase\":\"%s\",\"name\":\"%s\",\"implementation\":\"%s\",\"pack_elements\":%llu,\"unpack_elements\":%llu,\"pack_cycles\":%llu,\"unpack_cycles\":%llu,\"pack_read_bytes\":%llu,\"pack_write_bytes\":%llu,\"unpack_read_bytes\":%llu,\"unpack_write_bytes\":%llu,\"vector_calls\":%llu,\"hart_mask\":%u}\n",phase,names[i],ILLIXR_GEMMINI_PACKING,(unsigned long long)s.packing_elements,(unsigned long long)s.unpacking_elements,(unsigned long long)s.pack_cycles,(unsigned long long)s.unpack_cycles,(unsigned long long)s.pack_read_bytes,(unsigned long long)s.pack_write_bytes,(unsigned long long)(s.unpacking_elements*4),(unsigned long long)s.unpack_write_bytes,(unsigned long long)s.vector_calls,s.accelerator_mask);
   trace_output::print("ILLIXR_GEMMINI {\"phase\":\"%s\",\"name\":\"%s\",\"precision\":\"fp32\",\"calls\":%llu,\"submissions\":%llu,\"accelerator_hart_mask\":%u,\"caller_harts\":[%llu,%llu,%llu,%llu],\"packing_ns\":%llu,\"unpacking_ns\":%llu,\"queue_ns\":%llu,\"execution_ns\":%llu,\"cycles\":%llu,\"scratch_high_water\":%zu,\"max_m\":%zu,\"max_n\":%zu,\"max_k\":%zu}\n",
       phase,names[i],(unsigned long long)s.calls,(unsigned long long)s.submissions,s.accelerator_mask,
       (unsigned long long)s.caller_harts[0],(unsigned long long)s.caller_harts[1],(unsigned long long)s.caller_harts[2],(unsigned long long)s.caller_harts[3],

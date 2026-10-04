@@ -376,8 +376,25 @@ target_include_directories(app PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 # === CORE SOURCE FILES ======================================
 # ============================================================
 
+option(ILLIXR_ESTIMATOR_REPLAY "Isolated fixed-order Spike estimator test" OFF)
+if(ILLIXR_ESTIMATOR_REPLAY)
+  if(NOT BOARD STREQUAL "spike_riscv64")
+    message(FATAL_ERROR "Streamed estimator replay is Spike-only")
+  endif()
+  set(ILLIXR_ESTIMATOR_INPUT "" CACHE FILEPATH "Test input stream")
+  set(ILLIXR_ESTIMATOR_OUTPUT "" CACHE FILEPATH "Test output state stream")
+  if(NOT ILLIXR_ESTIMATOR_INPUT OR NOT ILLIXR_ESTIMATOR_OUTPUT)
+    message(FATAL_ERROR "Explicit estimator stream paths required")
+  endif()
+  add_compile_definitions(ILLIXR_ESTIMATOR_REPLAY=1 ILLIXR_ESTIMATOR_INPUT="${ILLIXR_ESTIMATOR_INPUT}" ILLIXR_ESTIMATOR_OUTPUT="${ILLIXR_ESTIMATOR_OUTPUT}")
+  execute_process(COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/extract_config.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/estimator_config" COMMAND_ERROR_IS_FATAL ANY)
+  target_include_directories(app PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/plugins/openvins" "${CMAKE_CURRENT_BINARY_DIR}/estimator_config")
+  set(ILLIXR_MAIN tests/estimator_spike/main.cpp)
+else()
+  set(ILLIXR_MAIN src/main.cpp)
+endif()
 target_sources(app PRIVATE
-  src/main.cpp
+  ${ILLIXR_MAIN}
   src/trace_transport.cpp
   src/node.cpp
   src/relative_clock.cpp

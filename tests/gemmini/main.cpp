@@ -7,6 +7,12 @@ extern "C" volatile uint64_t tohost;
 #ifdef ILLIXR_GEMMINI_EDGE_CASES_ONLY
 bool gemmini_edge_cases();
 #endif
+#ifdef ILLIXR_PACKING_TESTS
+bool gemmini_packing_cases();
+#endif
+#ifdef ILLIXR_PACKING_BENCHMARK
+bool gemmini_packing_benchmark();
+#endif
 int main() {
  using namespace ILLIXR;
 #ifdef ILLIXR_GEMMINI_EDGE_CASES_ONLY
@@ -20,7 +26,15 @@ int main() {
  const auto harts=clock_check::run();clock_check::platform(harts);
  blas_backend::initialize();
  bool good=!replay::failed() && vector_check::run();
+#ifdef ILLIXR_PACKING_TESTS
+ if(good)good=gemmini_packing_cases();
+#endif
+#ifndef ILLIXR_PACKING_TESTS_ONLY
  if(good)good=blas_backend::self_test();
+#endif
+#endif
+#ifdef ILLIXR_PACKING_BENCHMARK
+ if(good)good=gemmini_packing_benchmark();
 #endif
  gemmini_backend::shutdown();
 #ifdef ILLIXR_GEMMINI_EDGE_CASES_ONLY
