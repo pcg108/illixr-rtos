@@ -75,6 +75,21 @@
           "after": "c8b455d5d450b9f15897fd28b10534126d678a2c8042e9afe523d4f5b6130b8f"
         }
       }
+    },
+    {
+      "component": "chipyard",
+      "file": "patches/chipyard-remove-trafficgen-trace-dependency.patch",
+      "sha256": "3a11aea9ef85a94b76cefcda168e4a977725d40d56ac35fb9cc4004c35571a39",
+      "files": {
+        "generators/firechip/chip/src/main/scala/BridgeBinders.scala": {
+          "before": "b87979310b8d230c4a0f4c18267b1ee185c616ed057ac9ab16a18fd12f6f2e69",
+          "after": "9e881710bbf2c12a5152c18064f61c7a690d1296882e5f4bce02f9e3c0fce8ae"
+        },
+        "generators/firechip/chip/src/main/scala/TargetConfigs.scala": {
+          "before": "f821b6f1b48e154f5afe34229f9ac0918fc308f2e8fcde5eabd6ab646c47bcbf",
+          "after": "990100d9a2800f45c9740affdbb1747181a18f579042c0c4301083d731ac7fd9"
+        }
+      }
     }
   ],
   "scala_files": [

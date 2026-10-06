@@ -128,3 +128,36 @@ requests each, zeroed DRAM, and explicit HTIF service cadence. Do not change the
 request limit to 16: it does not fit this model's field/capacity. The 30 MHz FPGA
 clock is separate from generated 500 MHz/500 kHz target clocks and the firmware's
 explicit modeled 1 GHz/1 MHz interpretation.
+
+## Optional TrafficGen trace dependency
+
+The pinned FireChip sources contain optional TrafficGen tracing that references
+`InclusiveCacheTrafficGenTraceCycles`. That parameter exists in a local
+TrafficGen-modified inclusive-cache tree, but not in the pinned public
+inclusive-cache revision. Scala resolves these names even when the selected
+ILLIXR configuration never enables the feature.
+
+The installer applies `chipyard-remove-trafficgen-trace-dependency.patch` to the
+isolated XRSight checkout. It removes the FASED trace-print block, its imports,
+and the TrafficGen-only parameter override. It leaves the FASED bridge and memory
+model configuration intact. It does not add a dummy cache parameter or require
+the TrafficGen cache modifications. This checkout should not be used to reproduce
+the separate TrafficGen trace experiments.
+
+If Scala compilation reports this missing symbol, update XRSight-RTOS and rerun
+`setup_firesim.py install --chipyard "$CHIPYARD_DIR"` before retrying elaboration.
+There is no Chipyard/FireSim revision change for this fix. Installation is
+idempotent and rejects conflicting edits in the affected source files.
+For the retry, use a new guard run directory and log filename (for example,
+`elaboration-guard-trafficgen-fix` and `elaboration-trafficgen-fix.log`). Keep
+the existing latch path: a resource-stop latch still requires investigation;
+a normal Scala compilation failure is not a resource-stop event.
+
+Validation on 2026-10-06 recompiled the pinned inclusive-cache sources after
+removing all prior inclusive-cache and FireChip classes from the dependency
+assembly. Original FireChip sources reproduced the three missing-symbol errors;
+patched FireChip sources and all packaged configs compiled successfully. Fresh
+quad-core dual-Gemmini Chisel elaboration completed in 34.84 seconds. The real
+installer passed check/apply/repeat/conflict tests. Other dependency classes were
+reused; this does not claim a fresh full dependency build, Golden Gate lowering,
+Verilog compilation, synthesis or FPGA execution.

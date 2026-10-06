@@ -325,6 +325,8 @@ GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
 
 The backup retains the old environment files for inspection; relocated Conda environments should not be used as working installations. The full lockfile preserves the development environment's resolved package set, including host sysroot 2.34. Chipyard's existing host-glibc-triggered lockfile regeneration remains unchanged; a regenerated lockfile represents a different solve.
 
+The installer also removes an optional TrafficGen trace dependency from the pinned FireChip sources. XRSight does not use this instrumentation; the clean pinned inclusive-cache lacks its parameter. If elaboration reports `InclusiveCacheTrafficGenTraceCycles` missing, update this repository and rerun the installer before retrying. See [the packaging notes](config/firesim/README.md#optional-trafficgen-trace-dependency). No Chipyard revision change is required.
+
 ### Hardware configurations
 
 `setup_firesim.py configure --help` lists the aliases. Choose one and retain that choice through elaboration, firmware, bitstream packaging, and runtime setup.
