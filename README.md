@@ -248,11 +248,11 @@ The default production profile retains batched trace export, all-operation RITNe
 
 ### Pinned source checkout and host setup
 
-The hardware manifest is [config/firesim/manifest.json](config/firesim/manifest.json). The published component repositories retain upstream history and licenses. **Rocket, Saturn, and Shuttle forks are private**: your GitHub account must have access, and Git authentication must work before recursive initialization.
+The hardware manifest is [config/firesim/manifest.json](config/firesim/manifest.json). The published component repositories retain upstream history and licenses. Chipyard, Rocket, Saturn, and Shuttle repositories are public; HTTPS access does not require a GitHub account.
 
 | Repository | Required revision |
 |---|---|
-| `pcg108/chipyard`, branch `fix/rocket-saturn-shuttle-rtl` | `974da28f4dd76b2d063e02e19d745b8d2e40c98b` |
+| `pcg108/chipyard`, branch `fix/rocket-saturn-shuttle-rtl` | `621472a27a3ec8ce53af19af3b5e03fb96309d0c` |
 | `pcg108/rocket-chip` | `2c0e4784c46f1a67ef39699c7d67aef65e3ea8c0` |
 | `pcg108/saturn-vectors` | `9e04c8c6c70a4b4db5989f9a16a89679183a5d1d` |
 | `pcg108/shuttle` | `e789aa207148ade9eaed79f12841102597f5a0a5` |
@@ -264,11 +264,15 @@ The parent revision pins the corrected CPU/vector components, but its FireSim po
 
 ```bash
 git clone --branch fix/rocket-saturn-shuttle-rtl \
-  git@github.com:pcg108/chipyard.git "$CHIPYARD_DIR"
-git -C "$CHIPYARD_DIR" checkout --detach 974da28f4dd76b2d063e02e19d745b8d2e40c98b
+  https://github.com/pcg108/chipyard.git "$CHIPYARD_DIR"
+git -C "$CHIPYARD_DIR" checkout --detach 621472a27a3ec8ce53af19af3b5e03fb96309d0c
 cd "$CHIPYARD_DIR"
 # Requires the normal Chipyard host/Conda prerequisites.
 # Skip optional indexing, precompilation, FireSim, FireMarshal, and cleanup here.
+# Use HTTPS for the public component URLs stored as SSH in the pinned .gitmodules.
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=url.https://github.com/pcg108/.insteadOf \
+GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
 ./build-setup.sh -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 11
 git submodule update --init sims/firesim
 git -C sims/firesim fetch https://github.com/pcg108/firesim.git fa08b6cae659f88d00efb1a2d8c71be85aed97f8
@@ -294,6 +298,32 @@ export XRSIGHT_FPGA_DB=/absolute/path/to/your/discovered-fpga-db.json
 ```
 
 Use the FPGA database generated for **your board**, selecting one U250. Do not copy another machine's PCI address or serial number. The following flow assumes the FPGA has already been provisioned for FireSim.
+
+### Recovering from the missing Conda lockfile error
+
+The earlier Chipyard pin (`974da28f4`) omitted the full Conda lockfile. The current pin packages it and checks for missing lockfiles before creating environments. Its Conda step was validated in an isolated checkout with both environment directories initially absent; package caches were available. GCC 13.2.0 and an FP64 RVV compilation check passed. This does not establish validation of every later README command from scratch.
+
+If your old setup printed `conda-lock install` usage and failed at step 1, update the checkout and preserve the partially created environments before retrying. Run this from the affected Chipyard checkout, with Conda available:
+
+```bash
+set -e
+git fetch origin fix/rocket-saturn-shuttle-rtl
+git checkout --detach 621472a27a3ec8ce53af19af3b5e03fb96309d0c
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate base
+conda_setup_backup=$(mktemp -d "$PWD/conda-setup-backup.XXXXXX")
+for directory in .conda-lock-env .conda-env; do
+  if [ -d "$directory" ]; then
+    mv "$directory" "$conda_setup_backup/"
+  fi
+done
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=url.https://github.com/pcg108/.insteadOf \
+GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
+./build-setup.sh -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 11
+```
+
+The backup retains the old environment files for inspection; relocated Conda environments should not be used as working installations. The full lockfile preserves the development environment's resolved package set, including host sysroot 2.34. Chipyard's existing host-glibc-triggered lockfile regeneration remains unchanged; a regenerated lockfile represents a different solve.
 
 ### Hardware configurations
 

@@ -3,22 +3,22 @@
   "canonical_config": "illixr_u250_rocket_dual_gemmini_saturn_quad",
   "components": {
     "chipyard": {
-      "url": "git@github.com:pcg108/chipyard.git",
-      "revision": "974da28f4dd76b2d063e02e19d745b8d2e40c98b",
+      "url": "https://github.com/pcg108/chipyard.git",
+      "revision": "621472a27a3ec8ce53af19af3b5e03fb96309d0c",
       "path": "."
     },
     "rocket": {
-      "url": "git@github.com:pcg108/rocket-chip.git",
+      "url": "https://github.com/pcg108/rocket-chip.git",
       "revision": "2c0e4784c46f1a67ef39699c7d67aef65e3ea8c0",
       "path": "generators/rocket-chip"
     },
     "saturn": {
-      "url": "git@github.com:pcg108/saturn-vectors.git",
+      "url": "https://github.com/pcg108/saturn-vectors.git",
       "revision": "9e04c8c6c70a4b4db5989f9a16a89679183a5d1d",
       "path": "generators/saturn"
     },
     "shuttle": {
-      "url": "git@github.com:pcg108/shuttle.git",
+      "url": "https://github.com/pcg108/shuttle.git",
       "revision": "e789aa207148ade9eaed79f12841102597f5a0a5",
       "path": "generators/shuttle"
     },

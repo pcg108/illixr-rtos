@@ -11,7 +11,7 @@ configurations, not the production Rocket baseline.
 The containing Chipyard revision pins the corrected Rocket, Saturn and Shuttle
 repositories. FireSim must be selected separately at the revision in the manifest.
 The installer never changes Git revisions, fetches repositories, or modifies an
-unrelated file. Private component repositories require authorized GitHub access.
+unrelated file. The published Chipyard, Rocket, Saturn, and Shuttle repositories support anonymous HTTPS access.
 
 ## Source installation
 
