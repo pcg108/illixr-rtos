@@ -1,0 +1,18 @@
+{
+  "@ALIAS@": {
+    "PLATFORM": "xilinx_alveo_u250",
+    "TARGET_PROJECT": "firesim",
+    "TARGET_PROJECT_MAKEFRAG": "@MAKEFRAG@",
+    "DESIGN": "FireSim",
+    "TARGET_CONFIG": "@TARGET@",
+    "PLATFORM_CONFIG": "BaseXilinxAlveoU250Config",
+    "deploy_quintuplet": null,
+    "platform_config_args": {
+      "fpga_frequency": 30,
+      "build_strategy": "NORETIMING"
+    },
+    "post_build_hook": null,
+    "metasim_customruntimeconfig": null,
+    "bit_builder_recipe": "@BIT_BUILDER@"
+  }
+}

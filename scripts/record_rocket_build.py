@@ -126,6 +126,8 @@ def main():
              args.repo / "plugins/offline_eye/plugin.cpp", args.repo / "plugins/eye_tracking/plugin.cpp")})
         manifest["ritnet"] = {"enabled": True, "precision": "int8", "opcode": 2,
             "accelerator_hart": 0, "array_dim": 16, "publication_hz": 120,
+            "completion_fence_policy": "every_operation", "completion_fences_per_inference": 64,
+            "diagnostics": cache.get("ILLIXR_RITNET_DIAGNOSTICS", "OFF").upper() in true_values,
             "params_sha256": sha(ritnet / "port/include/gemmini_params.h"),
             "reference": json.loads((ritnet / "reference/manifest.json").read_text()),
             "sources": source_hashes}

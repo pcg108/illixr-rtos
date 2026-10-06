@@ -160,13 +160,17 @@ GEMV_KERNEL(dgemv_n,1)
 GEMV_KERNEL(dgemv_t,2)
 #endif
 namespace ILLIXR::blas_backend {
+
 void initialize() {
- for(auto &value:scratch.guard) value=sentinel;
- printf("ILLIXR_BLAS {\"backend\":\"%s\",\"scratch_bytes\":%zu,\"interface_bits\":32,\"threads\":1}\n",ILLIXR_LINALG_BACKEND,arena_size);
+  // There is preallocated 32 MB of scratch space for temporary numerical data
+  // sentinel fills known bit pattern after workspace to ensure we don't overwrite
+  for(auto &value:scratch.guard) value=sentinel;
+  printf("ILLIXR_BLAS {\"backend\":\"%s\",\"scratch_bytes\":%zu,\"interface_bits\":32,\"threads\":1}\n",ILLIXR_LINALG_BACKEND,arena_size);
 #ifdef ILLIXR_USE_GEMMINI_BLAS
- gemmini_backend::initialize();
+  gemmini_backend::initialize();
 #endif
 }
+
 #ifdef ILLIXR_DIAGNOSTIC_BLAS_PROGRESS
 namespace {
 unsigned diagnostic_case = 0;

@@ -16,6 +16,19 @@ def calls(source):
   result.append((m.start(),end+1,m[1],args))
  return result
 
+def check_coverage(source, catalog):
+ ops=calls(source)
+ ids=list(map(int,re.findall(r'const struct rd_operation rd_op = \{(\d+),',source)))
+ assert ids==list(range(1,len(ops)+1)) and len(ops)==64, 'Missing or duplicate operation boundaries'
+ assert source.count('if(rd_end()) return -3;')==len(ops)
+ assert len(catalog)==len(ops)
+ for (start,end,kind,args),expected in zip(ops,catalog):
+  assert (kind,args)==(expected['kind'],expected['arguments']), 'Graph call changed'
+  # No preprocessor directive may make the production completion conditional.
+  assert re.match(r'\s*gemmini_fence\(\);\s*#ifdef RITNET_DIAGNOSTICS',
+                  uncomment(source[end:])), 'Missing unconditional operation fence'
+ return len(ops)
+
 def view(pointer,rows,cols,stride,width=1):return '{(const void*)('+pointer+'),'+','.join(map(str,[rows,cols,stride,width]))+'}'
 def symbol(p):return re.sub(r'^\([^)]*\)\s*','',p).strip()
 def immutable(p,width=1):
@@ -50,10 +63,8 @@ def main():
  ap=argparse.ArgumentParser();ap.add_argument('--check',action='store_true');args=ap.parse_args()
  p=ROOT/'third_party/ritnet/port/ritnet.c';source=p.read_text();ops=calls(source)
  if args.check:
-  ids=list(map(int,re.findall(r'const struct rd_operation rd_op = \{(\d+),',source)))
-  assert ids==list(range(1,len(ops)+1)) and len(ops)==64
-  assert source.count('if(rd_end()) return -3;')==len(ops)
-  print('64 active operations each have a distinct diagnostic boundary');return
+  check_coverage(source,json.loads((p.parent/'diagnostic_operations.json').read_text()))
+  print('64 unchanged operations each have an unconditional production fence and diagnostic boundary');return
  assert 'rd_op' not in source,'Already instrumented'
  insertions=[];assets=set();catalog=[]
  for i,(start,end,kind,a) in enumerate(ops,1):
@@ -62,7 +73,7 @@ def main():
   # float rounding in the descriptor rather than an extra double expression.
   values=['(double)(float)('+v+')' for v in params]
   pre='\n/* RITNET_DIAG_BEGIN */\n#ifdef RITNET_DIAGNOSTICS\n    { const struct rd_operation rd_op = {'+str(i)+','+json.dumps(name)+','+json.dumps(kind)+',\n      {'+','.join(inputs)+'},'+out+',\n      {'+','.join(values)+'},'+str(len(params))+'};\n      rd_begin(&rd_op);\n#endif\n'
-  post='\n#ifdef RITNET_DIAGNOSTICS\n      if(rd_end()) return -3;\n    }\n#endif\n/* RITNET_DIAG_END */\n'
+  post='\n/* Complete this operation before the next tensor consumer or buffer reuse. */\ngemmini_fence();\n#ifdef RITNET_DIAGNOSTICS\n      if(rd_end()) return -3;\n    }\n#endif\n/* RITNET_DIAG_END */\n'
   insertions.extend([(start,pre),(end,post)])
   catalog.append(dict(id=i,name=name,kind=kind,arguments=a,parameter_expressions=params))
  for at,text in sorted(insertions,reverse=True):source=source[:at]+text+source[at:]

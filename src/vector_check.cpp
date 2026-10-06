@@ -36,15 +36,25 @@ bool verify(const unsigned char *expected,unsigned csr) {
 }
 void worker(void *arg,void *,void *) {
   const auto id=static_cast<unsigned>(reinterpret_cast<uintptr_t>(arg));
-  if(vlenb()!=32) { check(false); return; }
+  // check vector register width and basic arithmetic 
+  if (vlenb() != 32) { 
+    check(false); 
+    return; 
+  }
+  // sample input
   alignas(64) const double input[]={1.,2.,3.,4.};
   alignas(64) double output[4]{};
+  
+  // simple vector function written directly in assembly, in src/vector_check.S
   illixr_vector_fp64(input,output);
   for(unsigned i=0;i<4;++i) check(output[i]==2.*input[i]*input[i]);
+
+
   alignas(64) unsigned char expected[1024];
   for(unsigned r=0;r<rounds;++r) {
     pattern(expected,id*rounds+r);
     const unsigned csr=(id+r)&7;
+    // various vector load tests 
     illixr_vector_load(expected,csr);
     // Remain runnable across timer ticks and competing vector workers.
     const auto start=k_cycle_get_64();
@@ -75,16 +85,27 @@ void migrating_worker(void *,void *,void *) {
   }
 }
 }
+/*
+ * Check functionality of vector processing unit
+*/
 bool run() {
+
   for(unsigned i=0;i<workers;++i) {
+
+    // create 2 test workers per hart 
     auto tid=k_thread_create(&threads[i],stacks[i],K_THREAD_STACK_SIZEOF(stacks[i]),
         worker,reinterpret_cast<void *>(uintptr_t(i)),nullptr,nullptr,4,0,K_FOREVER);
+
+    // pin if requested 
 #ifdef CONFIG_SCHED_CPU_MASK
     check(k_thread_cpu_pin(tid,i%harts)==0);
 #endif
   }
   for(auto &thread:threads) k_thread_start(&thread);
   for(auto &thread:threads) k_thread_join(&thread,K_FOREVER);
+
+  // migration worker if there are multiple harts with affinity support 
+  // loads a pattern, signals readiness, and migrates the thread to a different hart
 #ifdef CONFIG_SCHED_CPU_MASK
   if(!atomic_get(&errors) && harts>1) {
     auto tid=k_thread_create(&threads[0],stacks[0],K_THREAD_STACK_SIZEOF(stacks[0]),
@@ -100,6 +121,7 @@ bool run() {
     check(atomic_get(&migrations)==4*harts);
   }
 #endif
+  // check that all expected harts participated in the test
   check(atomic_get(&seen)==(1u<<harts)-1);
   printf("ILLIXR_VECTOR_CHECK {\"passed\":%s,\"hart_mask\":%u,\"vlenb\":32,\"fp64\":true,\"errors\":%u,\"migrations\":%u,\"worker_rounds\":[",
       atomic_get(&errors)?"false":"true",unsigned(atomic_get(&seen)),unsigned(atomic_get(&errors)),unsigned(atomic_get(&migrations)));

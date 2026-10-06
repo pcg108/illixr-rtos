@@ -1,0 +1,8 @@
+{
+  "@ALIAS@": {
+    "bitstream_tar": "@BITSTREAM@",
+    "driver_tar": "@DRIVER_TAR@",
+    "deploy_quintuplet_override": "@QUINTUPLET@",
+    "custom_runtime_config": "@RUNTIME_CONF@"
+  }
+}

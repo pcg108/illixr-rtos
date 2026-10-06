@@ -92,6 +92,12 @@ inline uint64_t new_outputs{}, repeated_outputs{}, no_outputs{}, fresh_on_time_p
 inline atomic_t trace_overflow{};
 inline std::size_t presentation_cursor{};
 inline uint64_t displayed_warp{}, next_display_slot{1};
+
+/**
+ * Initialize the GPU structures.
+ * We use a static image throughout allocated once here 
+ * 2 mutexes protext frame publicationa and timewarp completion/presentation.
+ */
 inline void initialize() {
   k_mutex_init(&frame_mutex);
   k_mutex_init(&completion_mutex);
@@ -112,6 +118,7 @@ inline void initialize() {
         }
       }
 }
+
 inline bool sources_done() {
   return atomic_get(&replay::imu_done) && atomic_get(&replay::cam_done) &&
          atomic_get(&replay::vio_done) && atomic_get(&replay::integrator_done);
@@ -200,24 +207,39 @@ inline void publish_warp(Completion &completion, unsigned hart) {
 }
 // Caller holds completion_mutex. Timestamp filtering is essential: an observer
 // running late must never retroactively present an output published in its future.
+/*
+ * Models which timewarp output would have been shown at each display refresh boundary 
+ * Selects from already-published timewarp completions and records presentation result
+*/
 inline void observe_display_locked(int64_t now, unsigned hart) {
+
+  // Choose how far to advance presentation model. Normally, process boundaries up to current time, but if 
+  // timwarp has finished, cap at display boundary at or after final completion/shutdown time
   int64_t end = now;
   if (atomic_get(&timewarp_done)) {
     const int64_t final = boundary_at_or_after(warp_trace_size ? std::max(warp_trace[warp_trace_size-1].publication_ns, timewarp_done_ns) : timewarp_done_ns);
     if (end > final) end = final;
   }
+
+  // process every display boundary that has arrived 
   while (vsync(next_display_slot) <= end && !replay::failed()) {
     if (display_trace_size == trace_capacity) { overflow(); break; }
-    const int64_t boundary = vsync(next_display_slot);
+
+    // time boundary == slot * period 
+    const int64_t boundary = vsync(next_display_slot); 
+    // find newest timewarp output available at that boundary 
     while (presentation_cursor < warp_trace_size && warp_trace[presentation_cursor].publication_ns <= boundary)
       ++presentation_cursor;
     const Completion *selected = presentation_cursor ? &warp_trace[presentation_cursor-1] : nullptr;
+    
+    // if a completion is available, record it in the display trace
     Display d;
     d.slot = next_display_slot++;
     d.observed_ns = now;
     d.hart = hart;
     if (selected) {
-      d.warp_id = selected->warp_id; d.frame_id = selected->frame.frame_id;
+      d.warp_id = selected->warp_id; 
+      d.frame_id = selected->frame.frame_id;
       d.publication_ns = selected->publication_ns;
       d.new_output = displayed_warp != d.warp_id;
       d.fresh_on_time = d.new_output && selected->display_slot == d.slot &&

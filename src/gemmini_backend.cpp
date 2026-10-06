@@ -1,3 +1,4 @@
+#include "hpm.hpp"
 #include "gemmini_backend.hpp"
 #include "gemmini_packing.hpp"
 #ifdef ILLIXR_GEMMINI_PACKING_RVV
@@ -23,6 +24,7 @@ k_thread worker;
 K_SEM_DEFINE(ready,0,1);
 K_SEM_DEFINE(done,0,1);
 Request request{};
+hpm::Context request_owner{};
 float *storage=nullptr;
 bool started=false,stopping=false;
 struct Stats {
@@ -45,9 +47,11 @@ void run(void*,void*,void*) {
   if(stopping) break;
   if(replay::hart_id()!=0) fail("accelerator worker escaped hart zero");
   const auto &r=request;
+  hpm::Scope attribution(request_owner);
   auto &s=stats[r.operation];
   const auto start=now(); s.queue_ns+=ns(start-submitted);
   float *a=storage,*b=a+r.m*r.k,*c=b+r.k*r.n;
+  hpm::exchange({request_owner.owner,hpm::Phase::Packing,request_owner.caller});
   const auto pack_cycle_start=core_cycles();
 #ifdef ILLIXR_GEMMINI_PACKING_RVV
 #ifdef ILLIXR_GEMMINI_PACKING_CONTIGUOUS
@@ -66,6 +70,7 @@ void run(void*,void*,void*) {
 #ifdef ILLIXR_GEMMINI_PACKING_RVV
   ++s.vector_calls;
 #endif
+  hpm::exchange({request_owner.owner,hpm::Phase::Accelerator,request_owner.caller});
   const auto packed=now(); s.pack_ns+=ns(packed-start);
   uint64_t cycle0,cycle1;
   asm volatile("rdcycle %0":"=r"(cycle0));
@@ -77,6 +82,7 @@ void run(void*,void*,void*) {
   gemmini_fence();
   asm volatile("fence rw,rw" ::: "memory");
   asm volatile("rdcycle %0":"=r"(cycle1));
+  hpm::exchange({request_owner.owner,hpm::Phase::Unpacking,request_owner.caller});
   const auto executed=now(); s.execute_ns+=ns(executed-packed); s.cycles+=cycle1-cycle0;
   ++s.submissions; s.accelerator_mask|=1u<<replay::hart_id();
   const auto unpack_cycle_start=core_cycles();
@@ -106,19 +112,31 @@ void submit(Request r) {
  if(!workspace_bytes(r,bytes) || bytes>capacity) fail("packing arena exhausted");
  s.high_water=std::max(s.high_water,bytes);
  storage=static_cast<float*>(blas_memory_alloc(0));
- request=r; submitted=now(); k_sem_give(&ready); k_sem_take(&done,K_FOREVER);
+ request=r;request_owner=hpm::context(); submitted=now(); k_sem_give(&ready); k_sem_take(&done,K_FOREVER);
  blas_memory_free(storage);storage=nullptr;
 }
 }
+/*
+  * Create and start a dedicated thread for servicing Gemmini matmul operations 
+  * Used when Gemmini BLAS backend enabled 
+*/
 void initialize() {
- if(started) fail("duplicate initialization");
- auto tid=k_thread_create(&worker,worker_stack,K_THREAD_STACK_SIZEOF(worker_stack),run,
-                          nullptr,nullptr,nullptr,K_PRIO_PREEMPT(5),0,K_FOREVER);
+  if(started) fail("duplicate initialization");
+  auto tid=k_thread_create(&worker,worker_stack,
+                          K_THREAD_STACK_SIZEOF(worker_stack),
+                          run,
+                          nullptr,nullptr,nullptr,
+                          K_PRIO_PREEMPT(5),0,K_FOREVER);
 #ifdef CONFIG_SMP
- if(k_thread_cpu_pin(tid,0)!=0) fail("cannot pin accelerator worker");
+    if(k_thread_cpu_pin(tid,0)!=0) fail("cannot pin accelerator worker");
 #endif
- k_thread_name_set(tid,"gemmini"); started=true;k_thread_start(tid);
+
+  k_thread_name_set(tid,"gemmini"); 
+  started=true;
+  hpm::register_thread(tid,hpm::Owner::System);
+  k_thread_start(tid);
 }
+
 void shutdown() {
  if(!started || stopping) return;
  stopping=true; k_sem_give(&ready);

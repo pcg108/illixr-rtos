@@ -1,0 +1,16 @@
+{
+  "build_farm": {
+    "base_recipe": "@BUILD_RECIPE@",
+    "recipe_arg_overrides": {
+      "default_build_dir": "@BUILD_DIR@",
+      "build_farm_hosts": [
+        "localhost"
+      ]
+    }
+  },
+  "builds_to_run": [
+    "@ALIAS@"
+  ],
+  "agfis_to_share": [],
+  "share_with_accounts": {}
+}

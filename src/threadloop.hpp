@@ -1,5 +1,6 @@
 #pragma once
 #include "plugin.hpp"
+#include "hpm.hpp"
 #include "replay.hpp"
 #include "stoplight.hpp"
 #include <exception>
@@ -16,12 +17,16 @@ public:
     else
       replay::fail("too many worker threads");
   }
+  /*
+   * Creates thread, assign name and optional CPU affinity, then starts it 
+  */
   void start() override {
     tid_ = k_thread_create(&thread_, stack_, stack_size_, thread_entry, this,
                            nullptr, nullptr, K_PRIO_PREEMPT(priority_), 0,
                            K_FOREVER);
     if (tid_) {
       k_thread_name_set(tid_, node_.name());
+      hpm::register_thread(tid_, node_.name());
       if (cpu_ >= 0) {
         if (cpu_ >= CONFIG_MP_MAX_NUM_CPUS)
           replay::fail("plugin affinity outside configured harts");

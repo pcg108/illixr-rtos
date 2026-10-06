@@ -134,6 +134,11 @@ inline void dump_placement() {
     trace_output::print("]}\n");
   }
 }
+
+/**
+ * A trace entry represents a single event in the system's execution.
+ * Used for logging/recording events for analysis
+ */
 struct TraceEntry {
   char kind{};
   std::uint64_t index{};
@@ -172,6 +177,8 @@ inline void trace_cam(std::size_t index, std::int64_t ts) {
   e.time = ts;
   trace(e);
 }
+////
+
 inline bool valid_pose(const PoseMsg &p) {
   return p.position.allFinite() && p.orientation.coeffs().allFinite() &&
          std::abs(p.orientation.norm() - 1.0f) < 1e-3f;
@@ -210,6 +217,10 @@ inline bool sleep_until_dataset(std::int64_t timestamp) {
   }
   return false;
 }
+
+/*
+ * Sample latest available poses, check validity, and record whether estimation pipeline is making progress 
+*/
 inline void observe_pose() {
   static std::uint64_t previous_slow{}, previous_fast{};
   PoseMsg slow{}, fast{};

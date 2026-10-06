@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Config
   * only the number of Rocket/Saturn tiles changes.
   */
 class FireSimILLIXRQuadRocketSaturnConfig extends Config(
+  new chipyard.config.WithNPerfCounters(13) ++
   new WithILLIXRFireSimPlatform ++
   new saturn.rocket.WithRocketVectorUnit(
     256, 128, saturn.common.VectorParams.refParams,

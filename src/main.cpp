@@ -1,3 +1,4 @@
+#include "hpm.hpp"
 #include "blas_backend.hpp"
 #ifdef ILLIXR_EYE_TRACKING
 #include "eye_tracking.hpp"
@@ -39,14 +40,24 @@ static void simulator_exit(int code) {
 }
 int main() {
   using namespace ILLIXR;
+
   // Drain the deferred boot banner before emitting machine-readable records.
   log_flush();
+
+  // initialize tracing system (initializes a mutex to protext trace queue)
   replay::initialize();
+
 #if ILLIXR_GPU_PIPELINE
+  // initialize GPU image and mutexes
   gpu_pipeline::initialize();
 #endif
+
+  // controlled multi-core testing to ensure all harts are online and functioning correctly
   const auto online_harts = clock_check::run();
+
+  // check that the platform hardware timer and clock frequency are aligned
   clock_check::platform(online_harts);
+
 #ifdef ILLIXR_DIAGNOSTIC_FPU_TRAP
   extern bool image_fpu_trap_check_entry();
   if (!image_fpu_trap_check_entry()) replay::fail("faulting FP divide modified its destination");
@@ -55,27 +66,51 @@ int main() {
   extern bool image_arithmetic_check_entry();
   if (!image_arithmetic_check_entry()) replay::fail("image arithmetic preflight failed");
 #endif
+
+  // prepare selected linalg backend for use 
   blas_backend::initialize();
+
+  // check vector unit functionality
   if (!vector_check::run()) replay::fail("vector context preflight failed");
+  
+  // check BLAS backend functionality
   if (!replay::failed() && !blas_backend::self_test()) replay::fail("BLAS self-test failed");
+  
+  // exit if backend checks failed 
+  if (!replay::failed() && !hpm::initialize()) replay::fail("HPM preflight failed");
   if (ILLIXR_PLATFORM_CHECK_ONLY) {
     printf("ILLIXR_DIAGNOSTIC %s\n", replay::failure_reason);
     simulator_exit(replay::failed() ? 1 : 0);
   }
+  
+  // create Phonebook instance 
   init_phonebook_global();
   auto &pb = get_phonebook();
+
   Runtime runtime{pb};
   int64_t runtime_ns = 0;
   if (!replay::failed()) {
+
+    // start all registered plugins
     runtime.start_all_plugins();
+
+    // set up the observation schedule. A period is ~8.33 ms corresponding to 120 Hz display
     constexpr int64_t period_ns = 1000000000LL / 120;
     int64_t deadline = 0;
+
+    // 120 Hz display loop:
+    // continue while workers remain active and no failures have occurred
     auto &clock = get_global_relative_clock();
     while (!runtime.finished() && !replay::failed()) {
+
+      // read latest VIO and propagated pose snapshots, validates them, updates stats, records trace entry
       replay::observe_pose();
 #if ILLIXR_GPU_PIPELINE
+      // record which timewarp output would have been shown at each display refresh boundary
       gpu_pipeline::observe_display(replay::hart_id());
 #endif
+      // calculate next deadline and skip elapsed observation slots
+      // if main has fallen behind, we move to first strictly failure slot 
       deadline += period_ns;
       const auto now = clock.now_ns();
       if (deadline <= now) {
@@ -83,6 +118,7 @@ int main() {
         replay::count(replay::PROBE_MISSED, missed);
         deadline += missed * period_ns;
       }
+      // sleep until that absolute deadline
       k_sleep(K_TIMEOUT_ABS_TICKS(clock.absolute_ticks(deadline)));
     }
     runtime.shutdown();
@@ -91,11 +127,15 @@ int main() {
 #endif
     runtime_ns = clock.now_ns();
   }
+
+  // shutdown runtime, export results
+
 #ifdef ILLIXR_EYE_TRACKING
   eye_tracking::shutdown();
   if (get_global_relative_clock().is_started())
     runtime_ns = get_global_relative_clock().now_ns();
 #endif
+  hpm::stop();
   // After every producer has joined it is safe to reclaim residual failure-path
   // records.
   CamMsg *cam = nullptr;
@@ -122,6 +162,7 @@ int main() {
 #endif
   dump_trace();
   dump_placement();
+  hpm::dump();
   blas_backend::dump();
   trace_output::print("ILLIXR_PROPAGATION {\"max_observed_position_norm_m\":%.17g}\n",
          max_observed_propagated_position_norm);

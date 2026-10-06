@@ -9,6 +9,7 @@ import org.chipsalliance.cde.config.Config
   * WithILLIXRFireSimPlatform supplies the common clocks, bridges and 256 MiB RAM.
   */
 class FireSimILLIXRSingleRocketSaturnConfig extends Config(
+  new chipyard.config.WithNPerfCounters(13) ++
   new WithILLIXRFireSimPlatform ++
   new saturn.rocket.WithRocketVectorUnit(
     256, 128, saturn.common.VectorParams.refParams,

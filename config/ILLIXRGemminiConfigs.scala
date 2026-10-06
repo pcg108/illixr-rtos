@@ -18,6 +18,7 @@ class WithILLIXRFP32Gemmini extends Config((site, here, up) => {
 })
 
 class ILLIXRSingleRocketGemminiSaturnConfig extends Config(
+  new chipyard.config.WithNPerfCounters(13) ++
   new WithILLIXRFP32Gemmini ++
   new saturn.rocket.WithRocketVectorUnit(256, 128, saturn.common.VectorParams.refParams,
     useL1DCache = false, mLen = Some(128)) ++
@@ -29,6 +30,7 @@ class ILLIXRSingleRocketGemminiSaturnConfig extends Config(
   new chipyard.config.AbstractConfig)
 
 class ILLIXRQuadRocketGemminiSaturnConfig extends Config(
+  new chipyard.config.WithNPerfCounters(13) ++
   new WithILLIXRFP32Gemmini ++
   new saturn.rocket.WithRocketVectorUnit(256, 128, saturn.common.VectorParams.refParams,
     useL1DCache = false, mLen = Some(128)) ++

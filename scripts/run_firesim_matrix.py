@@ -108,6 +108,23 @@ def validate_firmware(case, hardware=None):
     elf = Path(case['elf'])
     build = json.loads((elf.parent / 'build_manifest.json').read_text())
     target = build['target']
+    hpm_enabled = build.get('hpm', {}).get('enabled', False)
+    if case.get('require_hpm', hpm_enabled) != hpm_enabled:
+        raise ValueError('Firmware HPM setting differs from requested case')
+    if hpm_enabled:
+        audit = build['hpm'].get('compile_audit', {})
+        audit_path = elf.parent / 'hpm-compile-audit.json'
+        if (audit.get('passed') is not True or audit.get('file') != audit_path.name or
+                not audit_path.is_file() or sha256(audit_path) != audit.get('sha256')):
+            raise ValueError('HPM firmware lacks a verified application/plugin compile-definition audit')
+    if hpm_enabled and hardware and hardware.get('hpm', {}).get('programmable_counters') != 13:
+        raise ValueError('HPM firmware requires verified 13-counter Rocket hardware')
+    if 'ritnet_inferences' in case:
+        count = case['ritnet_inferences']
+        if (not case.get('ritnet_standalone') or type(count) is not int or
+                not 1 <= count <= 32 or
+                build.get('diagnostic_variant', {}).get('inferences') != count):
+            raise ValueError('Diagnostic preflight count must match the explicit firmware variant')
     if case.get('ritnet_standalone') and build.get('kind') != 'ritnet_standalone':
         raise ValueError('RITNet standalone case requires its explicit firmware manifest')
     if case.get('require_eye') and not build.get('ritnet', {}).get('enabled'):
@@ -745,10 +762,25 @@ def analyze_case(case, hardware, directory, execution, args):
                     extra_errors.append('Gemmini preflight lacks actual hart-zero execution evidence')
     if case.get('ritnet_standalone'):
         from ritnet_validation import standalone_errors
+        count_options = ({'expected_inferences': case['ritnet_inferences']}
+                         if 'ritnet_inferences' in case else {})
         extra_errors.extend(standalone_errors(data, console, case['harts'],
-            case.get('linalg_backend') == 'openblas_gemmini_fp32', vector_required=True))
+            case.get('linalg_backend') == 'openblas_gemmini_fp32', vector_required=True,
+            **count_options))
     if case.get('require_eye') and result.get('eye_tracking', {}).get('passed') is not True:
         extra_errors.append('Required eye inference validation missing or failed')
+    if case.get('require_hpm'):
+        if case['platform_check']:
+            pf = data.get('hpm_preflights', [])
+            tests = data.get('hpm_selftests', [])
+            if len(tests) != 1 or tests[0].get('passed') is not True or tests[0].get('hart_mask') != (1 << case['harts']) - 1:
+                extra_errors.append('Required HPM attribution self-test missing or failed')
+            if len(pf) != case['harts'] or {r.get('hart') for r in pf} != set(range(case['harts'])) or not all(r.get('passed') is True for r in pf):
+                extra_errors.append('Required HPM preflight evidence missing or failed')
+        else:
+            from hpm_analysis import check as check_hpm
+            result['hpm'], hpm_errors = check_hpm(data, case['harts'], required=True)
+            extra_errors.extend(hpm_errors)
     result['errors'].extend(extra_errors)
     terminal = re.search(r'\*\*\* (?:PASSED \*\*\*|FAILED \*\*\* \(code = \d+\)) after \d+ cycles', console)
     trace_complete = (len(data['clocks']) == 1 and len(data['platforms']) == 1) if case['platform_check'] else len(data['summaries']) == 1
@@ -771,6 +803,9 @@ def analyze_case(case, hardware, directory, execution, args):
 
 
 def run_case(case, args):
+    case = dict(case)
+    build = json.loads((Path(case['elf']).parent / 'build_manifest.json').read_text())
+    case.setdefault('require_hpm', build.get('hpm', {}).get('enabled', False))
     hardware_path = Path(case['hardware_manifest'])
     hardware = validate_hardware(hardware_path, case['harts'])
     identity = fingerprints(case)

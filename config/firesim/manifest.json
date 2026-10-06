@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "canonical_config": "illixr_u250_rocket_dual_gemmini_saturn_quad",
+  "components": {
+    "chipyard": {
+      "url": "git@github.com:pcg108/chipyard.git",
+      "revision": "974da28f4dd76b2d063e02e19d745b8d2e40c98b",
+      "path": "."
+    },
+    "rocket": {
+      "url": "git@github.com:pcg108/rocket-chip.git",
+      "revision": "2c0e4784c46f1a67ef39699c7d67aef65e3ea8c0",
+      "path": "generators/rocket-chip"
+    },
+    "saturn": {
+      "url": "git@github.com:pcg108/saturn-vectors.git",
+      "revision": "9e04c8c6c70a4b4db5989f9a16a89679183a5d1d",
+      "path": "generators/saturn"
+    },
+    "shuttle": {
+      "url": "git@github.com:pcg108/shuttle.git",
+      "revision": "e789aa207148ade9eaed79f12841102597f5a0a5",
+      "path": "generators/shuttle"
+    },
+    "firesim": {
+      "url": "https://github.com/pcg108/firesim.git",
+      "revision": "fa08b6cae659f88d00efb1a2d8c71be85aed97f8",
+      "path": "sims/firesim"
+    },
+    "gemmini": {
+      "url": "https://github.com/ucb-bar/gemmini.git",
+      "revision": "69a1c0383283d6ac95c99d2e53136fef4b0bb67e",
+      "path": "generators/gemmini"
+    }
+  },
+  "stock_gemmini_revision": "8c3f9923a44a2fe2c7930587be297d6d4f8c09ca",
+  "patches": [
+    {
+      "component": "firesim",
+      "file": "patches/firesim-max-cycles-u64.patch",
+      "sha256": "97b6d4e85dd963f3fd19a24b8b2e7e6f9bd1b170e40fa202c9483993a68fa17a",
+      "files": {
+        "sim/midas/src/main/cc/core/systematic_scheduler.cc": {
+          "before": "5632721c6bacdf59bb3d41ff7e3e5320ab48b2d6a1d7cae6f01dd321e47cba22",
+          "after": "cf4e9195570ca86fb1bd2a0293ca1142038ca082d11a943b82df3d8238d71024"
+        }
+      }
+    },
+    {
+      "component": "firesim",
+      "file": "patches/firesim-u250-reports-workers.patch",
+      "sha256": "0b491fc0956015e304d2b9b9867cc7c85c3a57f2351c78fb3c1e2042962213b3",
+      "files": {
+        "platforms/xilinx_alveo_u250/cl_firesim/scripts/platform_env.tcl": {
+          "before": "c452ef2344b6b7532326d970ddd54510cd863ed8364a59e6a7313c63e3bf58ae",
+          "after": "3556d03c1768fb42d4e0ae6c794a1203fe0d5c4a836a7eb6f7bbd1460b3491c5"
+        },
+        "platforms/xilinx_alveo_u250/cl_firesim/scripts/post_impl.tcl": {
+          "before": "28002937feb57a1c58af3a58f38732b1669ed0a692b42b698a3bb07d4b7c2180",
+          "after": "e686015d90df836729a13042cb753f3d659befb6e4fdc64b750e3194d3ffc38b"
+        },
+        "platforms/xilinx_alveo_u250/cl_firesim/scripts/post_synth.tcl": {
+          "before": "96e6bcd8abfda73b3179416e8e4ddb332863b03ff7197da9db3dd1e48554dc24",
+          "after": "ba3d591a8942f54f2a8408bfa4e4ba5b8363984fc9380da3da4a75ef2bf728d8"
+        }
+      }
+    },
+    {
+      "component": "chipyard",
+      "file": "patches/chipyard-stream-firrtl-emission.patch",
+      "sha256": "5846f352bfc83c5e358052043fccb2e391990b7cdda13db93d9747501dc517d8",
+      "files": {
+        "tools/stage/src/main/scala/phases/LegacyFirrtl2.scala": {
+          "before": "382a54fe1939ec7f97676c29ac3888ac279d03b7e2c6075df08a7ea900886cee",
+          "after": "c8b455d5d450b9f15897fd28b10534126d678a2c8042e9afe523d4f5b6130b8f"
+        }
+      }
+    }
+  ],
+  "scala_files": [
+    {
+      "source": "config/FireSimILLIXREyeTrackingConfigs.scala",
+      "destination": "generators/firechip/chip/src/main/scala/FireSimILLIXREyeTrackingConfigs.scala",
+      "sha256": "a098380acdb977f04027e2c6e672a5d5b31f1ed3f0ff8413534dfcedf97ade86"
+    },
+    {
+      "source": "config/FireSimILLIXRGemminiSaturnConfigs.scala",
+      "destination": "generators/firechip/chip/src/main/scala/FireSimILLIXRGemminiSaturnConfigs.scala",
+      "sha256": "5e0d06e40ca70846c6198d628a1058782d0b75e6f9f37add3a2ec7f6d2adfd58"
+    },
+    {
+      "source": "config/FireSimILLIXRQuadRocketSaturnConfig.scala",
+      "destination": "generators/firechip/chip/src/main/scala/FireSimILLIXRQuadRocketSaturnConfig.scala",
+      "sha256": "0e7c84f40dcd339b201c1f1272dd97ce9fd04aef1ceb102c5176e0b09445564c"
+    },
+    {
+      "source": "config/FireSimILLIXRSingleRocketSaturnConfig.scala",
+      "destination": "generators/firechip/chip/src/main/scala/FireSimILLIXRSingleRocketSaturnConfig.scala",
+      "sha256": "2676f4ec6800000de9dc06b4d25ca38662a5f22c2be488cef3e824a90c48cb94"
+    },
+    {
+      "source": "config/ILLIXRConfigs.scala",
+      "destination": "generators/firechip/chip/src/main/scala/ILLIXRConfigs.scala",
+      "sha256": "3d52ce94247c717d69ced659cb6c4bed6e40687c45c5c666ec3d43a3401d1121"
+    },
+    {
+      "source": "config/ILLIXREyeTrackingConfigs.scala",
+      "destination": "generators/chipyard/src/main/scala/config/ILLIXREyeTrackingConfigs.scala",
+      "sha256": "d25d5e5419146bce3e8a28df9775259d01c9b092a4d179aca5e5bdc1e19e91e0"
+    },
+    {
+      "source": "config/ILLIXRGemminiConfigs.scala",
+      "destination": "generators/chipyard/src/main/scala/config/ILLIXRGemminiConfigs.scala",
+      "sha256": "2a5051af11ded8066bf0419e36125ac6eae50c838a2b8300f4517cb8145a342c"
+    }
+  ],
+  "configurations": {
+    "illixr_u250_rocket_single": {
+      "target_config": "FireSimILLIXRSingleRocketConfig",
+      "harts": 1,
+      "vector": false,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_saturn_single": {
+      "target_config": "FireSimILLIXRSingleRocketSaturnConfig",
+      "harts": 1,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_gemmini_saturn_single": {
+      "target_config": "FireSimILLIXRSingleRocketGemminiSaturnConfig",
+      "harts": 1,
+      "vector": true,
+      "fp32_gemmini": true,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_int8_gemmini_saturn_single": {
+      "target_config": "FireSimILLIXRSingleRocketInt8GemminiSaturnConfig",
+      "harts": 1,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": true,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_dual_gemmini_saturn_single": {
+      "target_config": "FireSimILLIXRSingleRocketDualGemminiSaturnConfig",
+      "harts": 1,
+      "vector": true,
+      "fp32_gemmini": true,
+      "int8_gemmini": true,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_dual": {
+      "target_config": "FireSimILLIXRDualRocketConfig",
+      "harts": 2,
+      "vector": false,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_quad": {
+      "target_config": "FireSimILLIXRQuadRocketConfig",
+      "harts": 4,
+      "vector": false,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_saturn_quad": {
+      "target_config": "FireSimILLIXRQuadRocketSaturnConfig",
+      "harts": 4,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_gemmini_saturn_quad": {
+      "target_config": "FireSimILLIXRQuadRocketGemminiSaturnConfig",
+      "harts": 4,
+      "vector": true,
+      "fp32_gemmini": true,
+      "int8_gemmini": false,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_int8_gemmini_saturn_quad": {
+      "target_config": "FireSimILLIXRQuadRocketInt8GemminiSaturnConfig",
+      "harts": 4,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": true,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_rocket_dual_gemmini_saturn_quad": {
+      "target_config": "FireSimILLIXRQuadRocketDualGemminiSaturnConfig",
+      "harts": 4,
+      "vector": true,
+      "fp32_gemmini": true,
+      "int8_gemmini": true,
+      "core": "rocket",
+      "hpm": {
+        "programmable_counters": 13,
+        "event_map": "rocket-hpm-v1",
+        "width_bits": 40
+      }
+    },
+    "illixr_u250_shuttle_saturn_single": {
+      "target_config": "FireSimILLIXRSingleShuttleSaturnConfig",
+      "harts": 1,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "shuttle",
+      "qualification": "experimental; not the Rocket production baseline"
+    },
+    "illixr_u250_shuttle_saturn_quad": {
+      "target_config": "FireSimILLIXRQuadShuttleSaturnConfig",
+      "harts": 4,
+      "vector": true,
+      "fp32_gemmini": false,
+      "int8_gemmini": false,
+      "core": "shuttle",
+      "qualification": "experimental; not the Rocket production baseline"
+    }
+  },
+  "generated_clock_hz": 500000000,
+  "generated_timebase_hz": 500000,
+  "memory_base": 2147483648,
+  "memory_bytes": 268435456,
+  "physical_fpga_mhz": 30,
+  "build_strategy": "NORETIMING",
+  "bootrom_sha256": "5f6ae520d6612da2b31c2ee70bc872b743a77bbde0abba87bf96aa5fc249a216",
+  "generated_header_sha256": {
+    "fp32": "4e45a12fddba04fcc9eeac9fa554c7282ec55e14526d2efcd661ffabf8f371f9",
+    "int8": "b56e2e464f26c6e3b93f08b4c1fc41fc1f8a4ba44057ab751101c4bdc25c3901"
+  },
+  "provenance": {
+    "accepted_snapshot": "prashanth_illixr_fixed_rocket_matrix_20261002T211704Z/hardware-dual-quad",
+    "scope": "Source packaging of accepted flow; no claim that newly rendered checkout has been rebuilt on FPGA."
+  }
+}

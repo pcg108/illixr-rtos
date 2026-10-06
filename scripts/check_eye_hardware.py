@@ -35,6 +35,9 @@ def check(root,mode,cores):
   subprocess.run(['git','-C',str(chip/'generators'/subrepo),'apply','--reverse','--check',str(repo/'patches'/fix)],check=True)
  rtl=list((chip/'sims/firesim/sim/generated-src').rglob('FireSim-generated.sv'));assert len(rtl)==1,rtl
  report={'generated_rtl':{'path':str(rtl[0]),'sha256':sha(rtl[0])},'passed':True,'mode':mode,'harts':cores,'platform':platform,'headers':headers,'tile_instances':tiles,'firrtl':str(fir),'firrtl_sha256':sha(fir),'int8_hart':0,'int8_opcode':2,'fp32_opcode':3 if mode=='dual' else None}
+ if (root/'provenance/hpm-source.json').is_file():
+  from hpm_hardware import inspect as inspect_hpm
+  report['hpm']=inspect_hpm(fir,cores,chip/'generators/rocket-chip/src/main/scala/rocket/RocketCore.scala')
  (root/'provenance/generated-pre-synthesis.json').write_text(json.dumps(report,indent=2)+'\n')
  return report
 if __name__=='__main__':

@@ -1,0 +1,130 @@
+# Pinned local-U250 FireSim support
+
+`manifest.json` records the audited source revisions, copied Scala files, patches,
+configuration catalog, and accepted accelerator/boot-ROM hashes. This package
+reconstructs the tested configuration from source; it does not redistribute
+bitstreams or claim a new FPGA build has completed. The default is quad-core
+Rocket with Saturn on every hart and independent FP32/custom3 and INT8/custom2
+Gemmini accelerators on hart 0. Shuttle entries are experimental comparison
+configurations, not the production Rocket baseline.
+
+The containing Chipyard revision pins the corrected Rocket, Saturn and Shuttle
+repositories. FireSim must be selected separately at the revision in the manifest.
+The installer never changes Git revisions, fetches repositories, or modifies an
+unrelated file. Private component repositories require authorized GitHub access.
+
+## Source installation
+
+After cloning and initializing the pinned Chipyard/components and selecting the
+manifest's FireSim revision:
+
+```bash
+python3 "$XRSIGHT/scripts/setup_firesim.py" install --chipyard "$CHIPYARD" --check
+python3 "$XRSIGHT/scripts/setup_firesim.py" install --chipyard "$CHIPYARD"
+```
+
+The original Gemmini repository must contain stock commit
+`8c3f9923a44a2fe2c7930587be297d6d4f8c09ca`. If it is in a separate clone, add
+`--gemmini-source /absolute/path/to/gemmini`. The installer applies the packaged
+host max-cycle/build-report patches and installs a reproducibly renamed stock
+Gemmini namespace alongside the existing generator. An identical installation is
+accepted; an unexpected revision or modified destination is rejected.
+
+## Build preparation and generated parameters
+
+```bash
+python3 "$XRSIGHT/scripts/setup_firesim.py" configure \
+  --chipyard "$CHIPYARD" --work "$WORK" --build-only \
+  --config illixr_u250_rocket_dual_gemmini_saturn_quad
+```
+
+This writes fully expanded JSON-formatted YAML templates plus `commands.json`.
+No ELF, FPGA database, or bitstream is needed at this stage. The `elaborate` entry
+in `commands.json` is an argument array for `make ... verilog`; it produces the
+DTS/FIRRTL/FireSim RTL and the Gemmini parameter headers. The headers are
+`$CHIPYARD/gemmini_params_illixr.h` (FP32) and
+`$CHIPYARD/gemmini_params_illixr_int8.h` (INT8), when those arrays are selected.
+Different configurations require separate checkouts/build directories because
+header names and FireSim intermediate paths are shared within a checkout.
+
+Run elaboration/build commands under `scripts/firesim_resource_guard.py`:
+
+```bash
+python3 "$XRSIGHT/scripts/firesim_resource_guard.py" \
+  --scratch "$WORK/builds" --run-dir "$WORK/guard-build" \
+  --latch "$WORK/STOPPED_NO_AUTORESTART.json" --jobs 4 -- \
+  python3 "$XRSIGHT/scripts/firesim_manager.py" --chipyard "$CHIPYARD" -- \
+  buildbitstream -b "$WORK/config_build.yaml" \
+  -r "$WORK/config_build_recipes.yaml" -a "$WORK/config_hwdb_build.yaml"
+```
+
+Use the sourced Chipyard/FireSim Python environment, Vivado 2022.1, and the normal
+local U250 host prerequisites. The manager wrapper forwards the resource guard's
+ownership tag and worker limits to localhost SSH workers. The guard requires
+48 GiB available-memory reserve, stops at 64 GiB per-process RSS or a new OOM,
+and treats memory PSI as warning-only. It records each process identity before
+cleanup, never kills an unrelated job merely sharing a directory, preserves its
+stop latch, and does not restart. Use a new `--run-dir` for each deliberate attempt.
+
+Before synthesis, verify the generated description and parameters:
+
+```bash
+python3 "$XRSIGHT/scripts/check_firesim_platform.py" --elaboration-only \
+  --chipyard "$CHIPYARD" --config "$HW_CONFIG" \
+  --staging-dir "$STAGING_DIR" --rtl "$GENERATED_RTL" \
+  --elaboration-log "$ELABORATION_LOG" --output "$WORK/platform.json"
+```
+
+`commands.json` records the exact staging and RTL paths for the selected target.
+Capture the complete successful `make verilog` output as `ELABORATION_LOG` because
+FASED's compiled outstanding-request capacities are verified from this evidence.
+The resulting platform JSON is compatible with firmware artifact recording.
+It explicitly has `timing_closed: false`; it cannot authorize FPGA programming.
+
+## Review a completed build and package its driver
+
+After a build completes, use the `cl_<quintuplet>` directory containing
+`firesim.tar.gz`, `driver/`, and `vivado_proj/` as `BUILD_OUTPUT`. Supply the actual
+final post-route bus-skew report from the build project's `firesim.runs/impl_1/`:
+
+```bash
+python3 "$XRSIGHT/scripts/check_firesim_platform.py" \
+  --chipyard "$CHIPYARD" --config "$HW_CONFIG" \
+  --staging-dir "$STAGING_DIR" --rtl "$GENERATED_RTL" \
+  --elaboration-log "$ELABORATION_LOG" --build-output "$BUILD_OUTPUT" \
+  --bus-skew-report "$BUS_SKEW_REPORT" --firmware "$FIRMWARE" \
+  --output "$WORK/hardware.json"
+python3 "$XRSIGHT/scripts/setup_firesim.py" package-driver \
+  --chipyard "$CHIPYARD" --hardware "$WORK/hardware.json" \
+  --output-dir "$WORK/drivers"
+```
+
+The checker verifies generated hart/ISA/memory/interrupt/clock/bridge evidence,
+accelerator parameter headers and placement, ELF memory/HTIF/ABI compatibility,
+FASED limits, final setup/hold/pulse-width/bus-skew/routing reports, and packaged
+bitstream metadata. Driver packaging includes its shared libraries and the exact
+runtime configuration, preserving their hashes. Boot and workload correctness
+remain separate tests.
+
+## Runtime preparation
+
+```bash
+python3 "$XRSIGHT/scripts/setup_firesim.py" configure \
+  --chipyard "$CHIPYARD" --work "$WORK/run" --config "$HW_CONFIG" \
+  --elf "$FIRMWARE/zephyr.elf" --fpga-db "$FPGA_DB" \
+  --hardware-manifest "$WORK/hardware.json" --workload-name xrsight-quad
+```
+
+`FIRMWARE` must contain the recorded ELF, `.config`, CMake cache, DTS, dataset
+manifest, and `build_manifest.json`. The helper installs uniquely named workload
+links and emits `config_runtime.yaml`, `config_hwdb.yaml`, `workload.json`, and
+`case.json`. It refuses to overwrite unrelated links or hand-edited outputs.
+Run `infrasetup` and `runworkload` from the FireSim `deploy` directory using these
+files, only after confirming exclusive ownership of the FPGA. Use the main README's
+record/collect commands to preserve the watchdog/exit result and run analysis.
+
+The retained runtime model is 30-cycle FASED read/write latency with 10 outstanding
+requests each, zeroed DRAM, and explicit HTIF service cadence. Do not change the
+request limit to 16: it does not fit this model's field/capacity. The 30 MHz FPGA
+clock is separate from generated 500 MHz/500 kHz target clocks and the firmware's
+explicit modeled 1 GHz/1 MHz interpretation.

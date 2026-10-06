@@ -40,8 +40,18 @@ cache = {}
 for line in (artifact / 'CMakeCache.txt').read_text().splitlines():
     if line.startswith(('#','//')) or '=' not in line: continue
     key,value=line.split('=',1);cache[key.split(':',1)[0]]=value
+state['hpm']={'enabled':cache.get('ILLIXR_HPM_PROFILE','OFF').upper() in ('ON','1','TRUE','YES'),
+              'event_map':'rocket-hpm-v1','programmable_counters':13,'attribution':'scheduled_context_exclusive'}
+if 'ILLIXR_HPM_PROFILE' in cache:
+    from hpm_build_audit import audit as audit_hpm_build
+    audit=audit_hpm_build(Path(cache['CMAKE_CACHEFILE_DIR'])/'build.ninja',state['hpm']['enabled'])
+    audit_path=artifact/'hpm-compile-audit.json'
+    audit_path.write_text(json.dumps(audit,indent=2)+'\n')
+    state['hpm']['compile_audit']={'file':audit_path.name,'sha256':sha(audit_path),'passed':True}
+    state['artifact_sha256'][audit_path.name]=sha(audit_path)
 backend=cache.get('ILLIXR_LINALG_BACKEND','eigen')
-state['linalg']={'backend':backend}
+state['linalg']={'backend':backend,'gemmini_packing':cache.get('ILLIXR_GEMMINI_PACKING','scalar'),'gemmini_packing_traversal':cache.get('ILLIXR_GEMMINI_PACKING_TRAVERSAL','rows')}
+state['linalg']['packing_saturn_compat']=cache.get('ILLIXR_PACKING_SATURN_COMPAT','OFF').upper() in ('ON','1','TRUE','YES')
 if backend != 'eigen':
     archive=Path(cache['ILLIXR_OPENBLAS_ARCHIVE'])
     provenance=archive.parent.parent/'manifest.json'

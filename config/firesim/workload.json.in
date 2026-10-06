@@ -1,0 +1,15 @@
+{
+  "benchmark_name": "@WORKLOAD@",
+  "common_bootbinary": "zephyr.elf",
+  "common_rootfs": null,
+  "common_outputs": [],
+  "common_simulation_outputs": [
+    "uartlog",
+    "memory_stats0.csv"
+  ],
+  "workloads": [
+    {
+      "name": "@WORKLOAD@"
+    }
+  ]
+}

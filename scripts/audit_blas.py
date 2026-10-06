@@ -11,7 +11,9 @@ if backend!='eigen':
  allowed={p+op+'_' for p in 'ds' for op in ('gemm','gemv','trmm','trmv','trsm','axpy')}
  text=subprocess.check_output([a.nm,'-u',str(a.build/'app/libapp.a')],text=True)
  used=set(re.findall(r'\bU ([sdcz][a-z0-9]+_)$',text,re.M))
- oracle=a.build/'CMakeFiles/app.dir/src/blas_reference.cpp.obj'
+ oracles=list((a.build/'CMakeFiles/app.dir').rglob('blas_reference.cpp.obj'))
+ if len(oracles)!=1: raise SystemExit('Expected exactly one independent BLAS numerical oracle object: '+str(oracles))
+ oracle=oracles[0]
  oracle_symbols=subprocess.check_output([a.nm,'-u',str(oracle)],text=True)
  if re.search(r'\bU (?:__wrap_)?[sdcz][a-z0-9]+_$',oracle_symbols,re.M):
   raise SystemExit('Eigen-only numerical oracle unexpectedly calls BLAS')
@@ -45,5 +47,16 @@ if backend!='eigen':
    custom3=[word for word in re.findall(r'^\s*[0-9a-f]+:\s+([0-9a-f]{8})\s',assembly,re.M) if int(word,16)&127==0x7b]
    if not custom3: raise SystemExit('No Gemmini custom3 instructions in ELF')
    result['gemmini']={'custom3_instruction_sites':len(custom3),'params_sha256':manifest['gemmini_params_sha256'],'precision':'fp32-gemm-gemv','execution_hart':0}
+   packing=cache.get('ILLIXR_GEMMINI_PACKING','scalar')
+   result['gemmini']['packing']=packing
+   if packing=='rvv':
+    packing_evidence={}
+    for kernel,instruction in (('illixr_pack_d2f','vfncvt.f.f.w'),('illixr_pack_f2d','vfwcvt.f.f.v')):
+     code=subprocess.check_output([a.nm.replace('-nm','-objdump'),'-d','--disassemble='+kernel,str(a.artifact/'zephyr.elf')],text=True)
+     if instruction not in code:raise SystemExit('Missing actual RVV packing conversion: '+kernel)
+     path=a.artifact/(kernel+'.disassembly.txt');path.write_text(code)
+     packing_evidence[kernel]={'disassembly':path.name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+    result['gemmini']['packing_kernels']=packing_evidence
+
 (a.artifact/'blas-audit.json').write_text(json.dumps(result,indent=2)+'\n')
 print('BLAS symbol/ABI audit passed:',backend)

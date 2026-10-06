@@ -70,6 +70,31 @@ def check_blas(data, harts):
  if backend=='openblas_gemmini_fp32':
   records=data.get('gemmini',[]);preflight=data.get('gemmini_selftests',[])
   result.update(gemmini=records,gemmini_selftests=preflight,computation_precision='fp32-gemm-gemv')
+  packing=data.get('gemmini_packing',[])
+  result['gemmini_packing']=packing
+  if packing:
+   expected_packing={(r.get('phase'),r.get('name')) for r in records}
+   if len(packing)!=len(records) or {(r.get('phase'),r.get('name')) for r in packing}!=expected_packing: errors.append('Missing or duplicate packing records')
+   if len({r.get('implementation') for r in packing})!=1: errors.append('Inconsistent packing implementation')
+   for r in packing:
+    if r.get('implementation') not in ('scalar','rvv') or any(type(r.get(k))is not int or r[k]<0 for k in ('pack_elements','unpack_elements')): errors.append('Invalid packing record')
+   for r in packing:
+    # Early packing traces contain only element counts; retain their support.
+    if 'pack_cycles' not in r: continue
+    keys=('pack_cycles','unpack_cycles','pack_read_bytes','pack_write_bytes','unpack_read_bytes','unpack_write_bytes','vector_calls','hart_mask')
+    if any(type(r.get(k)) is not int or r[k]<0 for k in keys):
+     errors.append('Invalid packing timing/byte counters');continue
+    match=[g for g in records if (g.get('phase'),g.get('name'))==(r.get('phase'),r.get('name'))]
+    if len(match)!=1: continue
+    g=match[0];width=8 if r['name'].startswith('d') else 4
+    if (r['pack_write_bytes']!=r['pack_elements']*4 or
+        r['unpack_read_bytes']!=r['unpack_elements']*4 or
+        r['unpack_write_bytes']!=r['unpack_elements']*width or
+        r['pack_read_bytes']>r['pack_elements']*width):
+     errors.append('Inconsistent packing byte counts')
+    if r['vector_calls']!=(g['submissions'] if r['implementation']=='rvv' else 0):
+     errors.append('Packing vector dispatch count mismatch')
+    if r['hart_mask']!=g['accelerator_hart_mask']: errors.append('Packing hart mismatch')
   result['gemmini_edges']=data.get('gemmini_edges',[])
   errors.extend(gemmini_edge_preflight_errors(data))
   expected={(phase,op) for phase in ('selftest','work') for op in ('sgemm','dgemm','sgemv','dgemv')}

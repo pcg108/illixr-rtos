@@ -1,3 +1,4 @@
+#include "hpm.hpp"
 #include "eye_tracking.hpp"
 #include "relative_clock.hpp"
 #include "replay.hpp"
@@ -86,6 +87,7 @@ void initialize() {
 #else
  static_assert(CONFIG_MP_MAX_NUM_CPUS==1,"RITNet requires CPU affinity on SMP");
 #endif
+ hpm::register_thread(tid,hpm::Owner::EyeTracking);
  k_thread_name_set(tid,"ritnet");started=true;k_thread_start(tid);
 }
 void publish(Image image) {

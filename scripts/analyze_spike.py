@@ -13,11 +13,11 @@ import sys
 def records(path):
     parsed = {key: [] for key in ("events", "poses", "probes", "summaries", "delays", "clocks",
               "diagnostics", "propagation", "placements", "platforms", "gpu_events", "gpu_results", "predictions",
-              "prediction_placements", "prediction_summaries", "warp_slots", "displays", "blas", "blas_work", "blas_memory", "blas_selftests", "vector_checks", "rvv_kernels", "gemmini", "gemmini_selftests", "gemmini_edges", "eye_configs", "eye_images", "eye_results", "eye_reads")}
+              "prediction_placements", "prediction_summaries", "warp_slots", "displays", "blas", "blas_work", "blas_memory", "blas_selftests", "vector_checks", "rvv_kernels", "gemmini", "gemmini_packing", "gemmini_selftests", "gemmini_edges", "eye_configs", "eye_images", "eye_results", "eye_reads", "hpm_configs", "hpm_work", "hpm_harts", "hpm_threads", "hpm_preflights", "hpm_selftests")}
     for number, raw in enumerate(Path(path).read_text(errors="replace").splitlines(), 1):
-        for prefix, key in (("ILLIXR_EYE_READ ", "eye_reads"), ("ILLIXR_EYE_CONFIG ", "eye_configs"), ("ILLIXR_EYE_IMAGE ", "eye_images"), ("ILLIXR_EYE_RESULT ", "eye_results"), ("ILLIXR_BLAS ", "blas"), ("ILLIXR_BLAS_WORK ", "blas_work"),
+        for prefix, key in (("ILLIXR_HPM_SELFTEST ", "hpm_selftests"), ("ILLIXR_HPM_CONFIG ", "hpm_configs"), ("ILLIXR_HPM_WORK ", "hpm_work"), ("ILLIXR_HPM_HART ", "hpm_harts"), ("ILLIXR_HPM_THREAD ", "hpm_threads"), ("ILLIXR_HPM_PREFLIGHT ", "hpm_preflights"), ("ILLIXR_EYE_READ ", "eye_reads"), ("ILLIXR_EYE_CONFIG ", "eye_configs"), ("ILLIXR_EYE_IMAGE ", "eye_images"), ("ILLIXR_EYE_RESULT ", "eye_results"), ("ILLIXR_BLAS ", "blas"), ("ILLIXR_BLAS_WORK ", "blas_work"),
                             ("ILLIXR_VECTOR_CHECK ", "vector_checks"), ("ILLIXR_RVV_KERNEL ", "rvv_kernels"),
-                            ("ILLIXR_GEMMINI ", "gemmini"), ("ILLIXR_GEMMINI_SELFTEST ", "gemmini_selftests"), ("ILLIXR_GEMMINI_EDGE ", "gemmini_edges"),
+                            ("ILLIXR_GEMMINI ", "gemmini"), ("ILLIXR_GEMMINI_PACKING ", "gemmini_packing"), ("ILLIXR_GEMMINI_SELFTEST ", "gemmini_selftests"), ("ILLIXR_GEMMINI_EDGE ", "gemmini_edges"),
                             ("ILLIXR_BLAS_MEMORY ", "blas_memory"), ("ILLIXR_BLAS_SELFTEST ", "blas_selftests"),
                             ("ILLIXR_TRACE ", "events"), ("ILLIXR_POSE ", "poses"),
                             ("ILLIXR_PROBE ", "probes"), ("ILLIXR_RESULT ", "summaries"),
@@ -407,6 +407,9 @@ def analyze(log, native=None, harts=None, require_initialized=False, require_asy
         return result
     summary = data["summaries"][0]
     result["summary"] = summary
+    from hpm_analysis import check as check_hpm
+    result["hpm"], hpm_errors = check_hpm(data, harts or summary.get("online_harts"))
+    errors.extend(hpm_errors)
     from blas_analysis import check_blas
     result["blas"], blas_errors = check_blas(data, harts or summary.get("online_harts", 1))
     errors.extend(blas_errors)

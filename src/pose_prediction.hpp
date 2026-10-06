@@ -1,3 +1,4 @@
+#include "hpm.hpp"
 #include "trace_output.hpp"
 #pragma once
 #include "latest_value.hpp"
@@ -20,6 +21,7 @@ public:
         k_mutex_unlock(&mutex_);
     }
     PredictionResult predict(PredictionConsumer consumer, std::int64_t target_ns) {
+        hpm::Scope scope({hpm::Owner::Prediction,hpm::Phase::Default,hpm::context().owner});
         PredictionState input;
         std::uint64_t sequence{};
         const bool available = prediction_state.read(input, sequence);

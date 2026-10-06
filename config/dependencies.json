@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "hardware_manifest": "firesim/manifest.json",
+  "sources": {
+    "zephyr": {"url": "https://github.com/ucb-bar/zephyr.git", "revision": "cd45a528d3bf81f9c7aa2a63f9fe512eee0881b0", "version": "4.1.99", "vector_patch": "patches/zephyr-vector-sdk-multilib.patch"},
+    "opencv": {"url": "https://github.com/opencv/opencv.git", "revision": "4223495e6cd67011f86b8ecd9be1fa105018f3b1", "version": "4.5.4", "patch": "scripts/patches/opencv-4.5.4-zephyr-threads.patch"},
+    "modules/lib/eigen": {"url": "https://gitlab.com/libeigen/eigen.git", "revision": "68f4e58cfacc686583d16cff90361f0b43bc2c1b", "version": "3.4.1"},
+    "openblas": {"url": "https://github.com/zekailin00/OpenBLAS.git", "revision": "6d12fcab91ebf4de5eb23c1218727d2551b8635e"}
+  },
+  "zephyr_sdk": {
+    "version": "0.17.0",
+    "compiler_version": "12.2.0",
+    "archives": {
+      "zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz": "0514d2c684dfb5f6327374bfed0b3dcf727ff1500195d26b3730f98252fed095",
+      "toolchain_linux-x86_64_riscv64-zephyr-elf.tar.xz": "cd97784c88de0207c93cf386f79d8d2606b46598dc74d4ad12cadd5617595964"
+    }
+  },
+  "rvv_compiler": {"version": "13.2.0", "chipyard_relative_path": ".conda-env/riscv-tools/bin/riscv64-unknown-elf-gcc", "abi": "lp64d", "march": "rv64gcv_zvl256b", "code_model": "medany", "runtime": "Zephyr SDK Newlib sysroot; no Linux libraries"},
+  "dataset": {"name": "EuRoC V1_02_medium", "camera_pairs": 50, "imu_samples": 501, "source_layout": "mav0/{imu0,cam0,cam1}", "distribution": "Download from the EuRoC MAV dataset provider; dataset is not included in this repository"}
+}
