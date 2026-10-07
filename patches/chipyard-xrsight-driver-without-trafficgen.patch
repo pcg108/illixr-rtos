@@ -1,0 +1,15 @@
+--- a/generators/firechip/chip/src/main/makefrag/firesim/driver.mk
++++ b/generators/firechip/chip/src/main/makefrag/firesim/driver.mk
+@@ -70,4 +70,12 @@
+ 		-I$(GENERATED_DIR) \
+ 		-g
+ 
++# XRSight targets do not instantiate a TrafficGen bridge or its RTL DPI model.
++# Keep the existing sources/libraries for TrafficGen and other legacy targets.
++ifneq ($(filter FireSimILLIXR%,$(TARGET_CONFIG)),)
++DRIVER_CC := $(filter-out $(chipyard_csrc_dir)/trafficgen_dpi.cc $(firechip_bridgestubs_lib_dir)/bridges/trafficgen.cc,$(DRIVER_CC))
++DRIVER_H := $(filter-out $(firechip_bridgestubs_lib_dir)/bridges/trafficgen%.h,$(DRIVER_H))
++TARGET_LD_FLAGS := $(filter-out -lboost_serialization,$(TARGET_LD_FLAGS))
++endif
++
+ # DOC include end: Bridge Build System Changes

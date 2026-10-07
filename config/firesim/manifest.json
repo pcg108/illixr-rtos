@@ -90,6 +90,17 @@
           "after": "990100d9a2800f45c9740affdbb1747181a18f579042c0c4301083d731ac7fd9"
         }
       }
+    },
+    {
+      "component": "chipyard",
+      "file": "patches/chipyard-xrsight-driver-without-trafficgen.patch",
+      "sha256": "16431327239f1bf453547218ca89e4671077bd352272a0fa63cb9bc1fda8c835",
+      "files": {
+        "generators/firechip/chip/src/main/makefrag/firesim/driver.mk": {
+          "before": "8a5a82cb09f05ce1bf85b66955b744f4459b662007bb60bbd7af5fb12f403b4d",
+          "after": "9e241c9f2004a3eb4ef233710c2a98486afa71b24c3651fc39b1c974b1a5239e"
+        }
+      }
     }
   ],
   "scala_files": [

@@ -161,3 +161,27 @@ quad-core dual-Gemmini Chisel elaboration completed in 34.84 seconds. The real
 installer passed check/apply/repeat/conflict tests. Other dependency classes were
 reused; this does not claim a fresh full dependency build, Golden Gate lowering,
 Verilog compilation, synthesis or FPGA execution.
+
+## Driver compilation without TrafficGen
+
+The pinned FireChip driver makefile adds every bridge source, a TrafficGen DPI
+model, and Boost serialization even for hardware with no TrafficGen bridge.
+The XRSight installer applies `chipyard-xrsight-driver-without-trafficgen.patch`:
+for `FireSimILLIXR...` target configurations it excludes `trafficgen.cc`,
+`trafficgen_dpi.cc`, TrafficGen header dependencies, and `-lboost_serialization`.
+Other target configurations retain their original TrafficGen source/link lists.
+No bridge sources are deleted and no hardware configuration changes.
+
+If `buildbitstream` fails compiling `trafficgen_socket_protocol.h` due to missing
+Boost headers, update XRSight, rerun `setup_firesim.py install`, and retry the
+build. Installing Boost is not required for this unused XRSight driver path.
+Use a fresh resource-guard run directory and log for the retry while retaining
+the existing stop-latch path. Do not discard completed build artifacts.
+
+Validation compiled and linked complete single- and quad-core U250 host drivers
+using accepted generated headers, with poison Boost archive headers that reject
+any accidental include. The original TrafficGen source failed that negative
+control. All 13 packaged target configurations exclude the dependency; a legacy
+TrafficGen target retains byte-identical source/link flag lists. Installer
+check/apply/repeat checks passed. This validates the host-driver change, not a new
+synthesis, bitstream or FPGA workload.
