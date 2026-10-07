@@ -11,11 +11,12 @@ The current graphics stages model asynchronous GPU latency and publish **dummy i
 
 ## Contents
 
-1. [Updates from XRSight 1.0](#updates-compared-with-xrsight-10)
-2. [Building the ELF](#building-the-firesim-elf)
-3. [Running on FireSim](#running-on-firesim)
-4. [Outputs and Analysis](#outputs-and-analysis)
-5. [Included Plugins](#included-plugins)
+1. [Updates from XRSight 1.0](#updates-from-xrsight-10)
+2. [Included Plugins](#included-plugins)
+3. [Chipyard Setup](#chipyard-setup)
+4. [Building the ELF](#building-the-elf)
+5. [Running on FireSim](#running-on-firesim)
+6. [Outputs and Analysis](#outputs-and-analysis)
 
 ## Updates from XRSight 1.0
 
@@ -60,8 +61,24 @@ From the above settings we can derive how the modeled CPU frequency is 1 GHz: wi
 
 The factor-two interpretation models a 1 GHz operating point on an unchanged bitstream built at 500 MHz target clock; it does not demonstrate physical 1 GHz silicon timing closure. Note that changing the modeled CPU frequency thus requires changing both the periphery bus frequency as well as the timebase. Changing only the CPU label without the timer interpretation would be inconsistent. Spike retains its separate 10 MHz timer configuration and provides functional evidence, not cycle-accurate hardware performance. See [clock experiments](docs/clock-experiments.md) and [baseline settings](docs/current-baseline.md).
 
+## Included plugins
 
-## Building the ELF
+The complete profile contains these nine components, based on the original ILLIXR runtime. The **counterpart** links describe the related desktop component with additional documentation on the intention and algorithm, but are not necessarily the same implementation.
+
+| Plugin | Role | Documentation |
+|---|---|---|
+| `offline_imu` | Replays embedded angular-velocity/acceleration samples at their dataset timestamps into independent VIO and integration queues. Every selected IMU must reach both consumers. | [Upstream](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#offline_imu); [RTOS transport](docs/imu-value-transport.md) |
+| `offline_cam` | Decodes embedded stereo PNG pairs and publishes due grayscale images to VIO. Expired opportunities and full-queue drops are counted separately. | [Upstream](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#offline_cam) |
+| `openvins` | Consumes camera/IMU input, estimates visual-inertial pose, and publishes the latest pose and integration baseline. It is the principal configurable BLAS workload. | [Upstream `open_vins`](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#open_vins); [backend integration](docs/gemmini-openblas.md) |
+| `imu_integrator` | Propagates the latest VIO baseline through retained IMUs, publishing current pose and coherent state for prediction. | [Related upstream integrator](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#rk4_integrator); [RTOS transport](docs/imu-value-transport.md) |
+| `pose_prediction` | Provides caller-thread RK4 prediction for a requested timestamp, including horizon and stale-state checks. It is an on-demand service, not another periodic publishing thread. | [Upstream service API](https://illixr.github.io/ILLIXR/latest/api/classILLIXR_1_1data__format_1_1pose__prediction/); [RTOS prediction](docs/gpu-pipeline.md) |
+| `eye_tracking` | Runs asynchronous RITNet on hart-0 INT8 Gemmini, reading the latest eye image and retaining each completed eye-position result for nonblocking consumers. | [RTOS implementation](docs/eye-tracking.rst); no corresponding official upstream plugin page found |
+| `offline_eye` | Republishes one embedded 240×160 eye sample at 120 Hz with timestamp/sequence metadata; pending inference notifications coalesce. | [RTOS implementation](docs/eye-tracking.rst); RTOS-specific image source |
+| `render_loop` | Requests a pose for the next display boundary and publishes an immutable dummy stereo-frame descriptor after its simulated GPU delay. | [Upstream scheduling counterpart: `gldemo`](https://illixr.github.io/ILLIXR/latest/plugin_README/README_gldemo/); [RTOS model](docs/gpu-pipeline.md) |
+| `timewarp` | Independently snapshots the latest completed frame, obtains a fresh pose and latest eye result, computes rotational correction, and models GPU completion. Frames and eye results can be reused. | [Upstream scheduling counterpart: `timewarp_gl`](https://illixr.github.io/ILLIXR/latest/plugin_README/README_timewarp_gl/); [RTOS model](docs/gpu-pipeline.md) |
+
+
+## Chipyard setup
 
 ### Host prerequisites and workspace
 
@@ -79,6 +96,51 @@ python3 -m venv "$XRSIGHT_WORK/venv"
 export XRSIGHT_PYTHON="$XRSIGHT_WORK/venv/bin/python"
 "$XRSIGHT_PYTHON" -m pip install --upgrade pip
 ```
+
+### Pinned checkout and compiler
+
+Complete this step before building `openblas_rvv` or `openblas_gemmini_fp32` archives. The tested RVV C compiler is GCC 13.2.0 supplied by Chipyard; the archive builder checks that exact version because its RVV compatibility workaround is compiler-specific. The Zephyr SDK continues to compile the application/kernel and supply Newlib, C++ libraries, and the ABI-compatible headers used by the RVV library. No FireSim manager, Vivado, or FPGA provisioning is needed merely to compile the RVV archive.
+
+Eigen and scalar OpenBLAS firmware builds can skip this step. A separately provisioned compatible GCC 13.2.0 can be selected through `XRSIGHT_RVV_CC`, but the documented and tested compiler source is the pinned Chipyard environment below. Running on FireSim requires this checkout **regardless of the firmware backend**.
+
+The hardware manifest is [config/firesim/manifest.json](config/firesim/manifest.json). The published component repositories retain upstream history and licenses. 
+
+| Repository | Required revision |
+|---|---|
+| `pcg108/chipyard`, branch `fix/rocket-saturn-shuttle-rtl` | `621472a27a3ec8ce53af19af3b5e03fb96309d0c` |
+| `pcg108/rocket-chip` | `2c0e4784c46f1a67ef39699c7d67aef65e3ea8c0` |
+| `pcg108/saturn-vectors` | `9e04c8c6c70a4b4db5989f9a16a89679183a5d1d` |
+| `pcg108/shuttle` | `e789aa207148ade9eaed79f12841102597f5a0a5` |
+| `pcg108/firesim`, tested `trafficgen-xdma` base | `fa08b6cae659f88d00efb1a2d8c71be85aed97f8` |
+| Existing Gemmini project | `69a1c0383283d6ac95c99d2e53136fef4b0bb67e` |
+| Namespaced stock Gemmini source for these arrays | `8c3f9923a44a2fe2c7930587be297d6d4f8c09ca` |
+
+**Before building Chipyard, please follow the** [Conda installation instructions](https://github.com/conda-forge/miniforge/) 
+
+To build Chipyard using the pinned dependencies:
+
+```bash
+git clone --branch fix/rocket-saturn-shuttle-rtl \
+  https://github.com/pcg108/chipyard.git "$CHIPYARD_DIR"
+git -C "$CHIPYARD_DIR" checkout --detach 621472a27a3ec8ce53af19af3b5e03fb96309d0c
+cd "$CHIPYARD_DIR"
+# The pinned .gitmodules uses SSH 
+# Local URL overrides allow fetching the components over HTTPS without an SSH key.
+git config submodule.generators/rocket-chip.url https://github.com/pcg108/rocket-chip.git
+git config submodule.generators/saturn.url https://github.com/pcg108/saturn-vectors.git
+git config submodule.generators/shuttle.url https://github.com/pcg108/shuttle.git
+# Requires the normal Chipyard host/Conda prerequisites.
+# Skip optional indexing, precompilation, FireSim, FireMarshal, and cleanup here.
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=url.https://github.com/pcg108/.insteadOf \
+GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
+./build-setup.sh -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 11
+cd "$XRSIGHT_ROOT"
+```
+
+## Building the ELF
+
+### Zephyr dependencies
 
 Reproduction uses verified pinned dependencies rather than current branches:
 
@@ -109,9 +171,20 @@ The helper calls the existing pinned bootstrap with an explicit workspace, verif
 
 Download **EuRoC V1_02_medium, ASL format**, from the [ETH EuRoC dataset page](https://projects.asl.ethz.ch/datasets/euroc-mav/) and its [Research Collection download](https://doi.org/10.3929/ethz-b-000690084). Extract it under `$XRSIGHT_WORK/data/V1_02_medium` so `$EUROC_MAV0` contains `cam0/data.csv`, `cam1/data.csv`, `imu0/data.csv`, and camera `data/` directories. The native accuracy report also uses the sequence's ground-truth data. Preserve the downloaded archive and its checksum. If the download is a collection archive, first extract its nested `V1_02_medium.zip`; the compiler needs the ASL directory layout, not a ROS bag.
 
+For a direct command-line download, the following uses the same third-party [GlowBond mirror](https://huggingface.co/datasets/GlowBond/EuRoC_MAV_Dataset) used for our existing dataset, pinned to a specific revision. It downloads the Vicon room 1 collection and extracts only the required sequence archive. The checksum below matches our tested local archive; it is not an independently published ETH checksum.
+
 ```bash
 mkdir -p "$XRSIGHT_WORK/data/V1_02_medium"
-unzip /absolute/path/to/V1_02_medium.zip -d "$XRSIGHT_WORK/data/V1_02_medium"
+curl --fail --location --retry 3 \
+  'https://huggingface.co/datasets/GlowBond/EuRoC_MAV_Dataset/resolve/29d08aeb1c8d9dc5c30497cc538d9cc61f872bb7/vicon_room1.zip' \
+  --output "$XRSIGHT_WORK/data/vicon_room1.zip"
+unzip -p "$XRSIGHT_WORK/data/vicon_room1.zip" \
+  'vicon_room1/V1_02_medium/V1_02_medium.zip' \
+  > "$XRSIGHT_WORK/data/V1_02_medium.zip"
+printf '%s  %s\n' \
+  '0cf5d44baf7aac5d6d705dfb6c5abdd097139bc95aa252dc0c00c66d479ebfc2' \
+  "$XRSIGHT_WORK/data/V1_02_medium.zip" | sha256sum --check -
+unzip "$XRSIGHT_WORK/data/V1_02_medium.zip" -d "$XRSIGHT_WORK/data/V1_02_medium"
 test -f "$EUROC_MAV0/cam0/data.csv"
 test -f "$EUROC_MAV0/cam1/data.csv"
 test -f "$EUROC_MAV0/imu0/data.csv"
@@ -131,7 +204,11 @@ Profiles select plugins at build time. Use a new build directory when changing h
 
 ### Backend and Hardware Compatibility
 
-`ILLIXR_LINALG_BACKEND` is a **global CMake choice**. `EIGEN_USE_BLAS` is enabled consistently across application/plugin translation units that share Eigen definitions. Only eligible Eigen operations call BLAS; selecting a backend does not move every operation to an accelerator. OpenVINS is the principal BLAS workload. Existing Eigen decomposition algorithms and FP64 estimator storage remain in place.
+XRSight is designed to allow flexibility for mapping BLAS operations to different backends in a heterogeneous SoC. This is controlled by `ILLIXR_LINALG_BACKEND`, a **global CMake choice**. 
+
+We do this by configuring the Eigen library to use OpenBLAS as a BLAS backend (`EIGEN_USE_BLAS` is enabled consistently across application/plugin translation units that share Eigen definitions). Only eligible Eigen operations call BLAS (e.g. matrix-matrix and matrix-vector multiplication), so selecting a backend does not move every single operation to an accelerator. As per the original design, OpenVINS is the principal BLAS workload. Existing Eigen decomposition algorithms and FP64 estimator storage remain in place.
+
+`ILLIXR_LINALG_BACKEND` options:
 
 | Setting | Execution | Required hardware |
 |---|---|---|
@@ -140,7 +217,9 @@ Profiles select plugins at build time. Use a new build directory when changing h
 | `openblas_rvv` | `RISCV64_ZVL256B` RVV OpenBLAS | Saturn REFV256D128, VLEN 256, FP64, vector context support |
 | `openblas_gemmini_fp32` | FP32 Gemmini for real GEMM/GEMV; accepted RVV OpenBLAS for other supported operations | Saturn plus FP32 Gemmini on hart 0 |
 
-The Gemmini backend is **mixed precision**: DGEMM/DGEMV receive doubles, convert/pack into FP32, compute in FP32, and widen/write the result into the caller's layout. This does not preserve FP64 multiplication/accumulation. The native acceptance bound remains 1 mm / 0.001 rad.
+Note that the Gemmini backend is **mixed precision**: DGEMM/DGEMV receive doubles, convert/pack into FP32, compute in FP32, and widen/write the result into the caller's layout. This does **not** preserve FP64 multiplication/accumulation. The native acceptance bound remains 1 mm / 0.001 rad.
+
+These are the provided Chipyard configurations in XRSight-RTOS:
 
 | Chipyard hardware family | Core counts provided | Linear algebra choices | Eye profile |
 |---|---|---|---|
@@ -150,13 +229,17 @@ The Gemmini backend is **mixed precision**: DGEMM/DGEMV receive doubles, convert
 | Rocket + Saturn + INT8 Gemmini | 1, 4 | Eigen, scalar or RVV OpenBLAS | Yes |
 | Rocket + Saturn + FP32 + INT8 Gemmini | 1, 4 | All four | Yes |
 
-These rows describe compatibility, not a claim that every possible profile/backend combination has been benchmarked. Plain Rocket SMP, scalar/RVV OpenBLAS, corrected single/quad accelerator images, and the eye-tracking matrix have separate [validation reports](docs/reproducibility-validation.md). No dual-core Saturn configuration is provided here.
+The majority of our experimentation was done on single and quad core Rocket with Saturn and the 2 Gemmini configurations. Different configurations can be built using standard Chipyard build procedures. Generally, the guidance for building new SoCs is that Saturn attached to every Rocket core is required to use the RVV backends, and the Gemmini configurations are assumed to be attached to hart 0. 
 
-FP32 Gemmini uses custom3, a 4×4 array, 32 KiB scratchpad and 8 KiB accumulators. INT8 Gemmini uses custom2, a 16×16 array, 256 KiB scratchpad and 64 KiB accumulators. Both attach only to hart 0. Each has its own priority-5 worker; only that worker issues its array's instructions. FP32 calls use a globally serialized, aligned 32 MiB BLAS arena. RITNet has separate static activations and publishes results asynchronously. There is no selectable production CPU/RVV eye-inference backend; its CPU implementation is a validation reference.
+FP32 Gemmini uses custom3, a 4×4 array, 32 KiB scratchpad and 8 KiB accumulators. INT8 Gemmini uses custom2, a 16×16 array, 256 KiB scratchpad and 64 KiB accumulators. Both attach only to hart 0. Each has its own priority-5 worker thread (lowest Zephyr scheduler priority), and only that worker issues its array's instructions. FP32 calls use a globally serialized, aligned 32 MiB BLAS arena. RITNet has separate static activations and publishes results asynchronously. 
+
+There is no selectable production CPU/RVV eye-inference backend; its CPU implementation is a validation reference.
 
 Render/timewarp always use CPU scheduling/math plus the GPU latency model. Their CMake delay settings are not real GPU backend selectors.
 
-### Example A: single-core Rocket, Eigen, complete GPU-model pipeline
+### Example A: single-core Rocket, Eigen
+
+To build a simple, single-core compatible ELF that does not use the OpenBLAS backend:
 
 ```bash
 export ZEPHYR_BASE="$XRSIGHT_WORK/deps/zephyr"
@@ -175,36 +258,84 @@ cmake -S "$XRSIGHT_ROOT" -B "$XRSIGHT_BUILD" -G Ninja \
 cmake --build "$XRSIGHT_BUILD" --parallel 4
 ```
 
-For dual or quad plain Rocket, replace **both** `rocket_single.conf` and `rocket_single.overlay` with `rocket_dual` or `rocket_quad`. Core count and interrupt topology are compiled into the ELF; do not reuse a single-core ELF to claim multicore validation.
+For dual or quad plain Rocket, replace **both** `rocket_single.conf` and `rocket_single.overlay` with `rocket_dual` or `rocket_quad`. Core count and interrupt topology are compiled into the ELF, so do not use a single-core ELF for multicore validation.
 
-### Vector setup and OpenBLAS archives
+### Example B: single-core Rocket, Eigen-OpenBLAS (Zephyr SDK only)
 
-Vector builds use an isolated Zephyr copy with the included SDK multilib-selection patch. It keeps application/kernel C on the correct RV64/lp64d SDK runtime while enabling explicit vector context assembly. This is not a scheduler-policy change.
+In order to build the same example as above but using scalar OpenBLAS as the backend, first build the OpenBLAS library:
+
+```bash
+export XRSIGHT_SYSROOT="$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/riscv64-zephyr-elf"
+"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/build_openblas.py" \
+  --source "$XRSIGHT_WORK/openblas-source" \
+  --build "$XRSIGHT_WORK/blas/openblas_scalar" \
+  --cc "$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc" \
+  --sysroot "$XRSIGHT_SYSROOT" \
+  --backend openblas_scalar \
+  --jobs 4
+```
+
+To use it, use 
+```
+-DILLIXR_LINALG_BACKEND=openblas_scalar \
+-DILLIXR_OPENBLAS_ARCHIVE="$XRSIGHT_WORK/blas/openblas_scalar/lib/libopenblas-zephyr.a"
+``` 
+in the CPU CMake example above (Example A). Chipyard's compiler and the vector Zephyr preparation are not needed for this scalar build.
+
+### Example C: Vector setup 
+
+Vector builds use an isolated Zephyr copy with an included patch for SDK multilib-selection. First, re-run `setup_xrsight.py` to use this patched version:
 
 ```bash
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/setup_xrsight.py" --work "$XRSIGHT_WORK" --vector
+
+# The Chipyard compiler is available after the prerequisite step
 export XRSIGHT_RVV_CC="$CHIPYARD_DIR/.conda-env/riscv-tools/bin/riscv64-unknown-elf-gcc"
 export XRSIGHT_SYSROOT="$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/riscv64-zephyr-elf"
 "$XRSIGHT_RVV_CC" --version
 ```
 
-Set up Chipyard as described below before using its compiler. The archive builder enforces the pinned compiler, `lp64d`, medany, Zephyr/Newlib headers, and no fast-math. All archives are static and single-threaded, use the standard 32-bit BLAS integer interface, and exclude desktop initialization/autodetection, OpenMP, LAPACK and LAPACKE. Retain the **whole archive build directory**, including its adjacent `manifest.json` and generated headers; CMake verifies their identity.
 
-Build scalar OpenBLAS:
+For RVV, invoke `build_openblas.py` with `--backend openblas_rvv --cc "$XRSIGHT_RVV_CC"` and the same Zephyr sysroot, using a separate archive directory. 
 
-```bash
+```
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/build_openblas.py" \
-  --source "$XRSIGHT_WORK/openblas-source" \
-  --build "$XRSIGHT_WORK/blas/openblas_scalar" \
-  --cc "$ZEPHYR_SDK_INSTALL_DIR/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc" \
-  --sysroot "$XRSIGHT_SYSROOT" --backend openblas_scalar --jobs 4
+  --source "$XRSIGHT_WORK/openblas-source"   \
+  --build "$XRSIGHT_WORK/blas/openblas_rvv"  \
+  --cc "$XRSIGHT_RVV_CC"    \
+  --sysroot "$XRSIGHT_SYSROOT" \
+  --backend openblas_rvv \
+  --jobs 4
 ```
 
-To use it, add `-DILLIXR_LINALG_BACKEND=openblas_scalar` and `-DILLIXR_OPENBLAS_ARCHIVE="$XRSIGHT_WORK/blas/openblas_scalar/lib/libopenblas-zephyr.a"` to the CPU example. For RVV, build with `--backend openblas_rvv --cc "$XRSIGHT_RVV_CC"`, use a separate archive directory, and select the vector Zephyr, `config/vector.conf`, and a matching `rocket_single_rvv.overlay` or `rocket_quad_rvv.overlay`.
+Select the vector Zephyr, `config/vector.conf`, and a matching `rocket_single_rvv.overlay` or `rocket_quad_rvv.overlay` when configuring the application.
 
-### Example B: quad-core Saturn + both Gemmini arrays, eye tracking, RVV packing
+```
+export ZEPHYR_BASE="$XRSIGHT_WORK/vector-deps/zephyr"
+export XRSIGHT_BUILD="$XRSIGHT_WORK/build/rocket-single-rvv" # or rocket-quad-rvv
+cmake -S "$XRSIGHT_ROOT" -B "$XRSIGHT_BUILD" -G Ninja \
+  -DBOARD=chipyard_riscv64 -DCMAKE_BUILD_TYPE=Release \
+  -DPYTHON_EXECUTABLE="$XRSIGHT_PYTHON" -DPython3_EXECUTABLE="$XRSIGHT_PYTHON" \
+  -DZEPHYR_MODULES= \
+  "-DEXTRA_CONF_FILE=$XRSIGHT_ROOT/config/vector.conf;$XRSIGHT_ROOT/config/rocket_1ghz.conf" \
+  -DDTC_OVERLAY_FILE="$XRSIGHT_ROOT/config/rocket_single_rvv.overlay" \
+  -DOPENCV_SRC_DIR="$XRSIGHT_WORK/deps/opencv" \
+  -DYAML_FILE="$XRSIGHT_ROOT/profiles/gpu_pipeline.yaml" \
+  -DILLIXR_DATASET_DIR="$EUROC_MAV0" -DILLIXR_DATASET_FRAMES=50 \
+  -DILLIXR_CORE_HZ=1000000000 -DILLIXR_PIN_PLUGINS=OFF \
+  -DILLIXR_LINALG_BACKEND=openblas_rvv \
+  -DILLIXR_OPENBLAS_ARCHIVE="$XRSIGHT_WORK/blas/openblas_rvv/lib/libopenblas-zephyr.a" 
+cmake --build "$XRSIGHT_BUILD" --parallel 4
 
-First elaborate the corresponding hardware configuration as described in [Running on FireSim](#running-on-firesim). Set `XRSIGHT_FP32_HEADER` to its generated `gemmini_params_illixr.h`; verify the generated `gemmini_params_illixr_int8.h` matches the bundled RITNet parameters. Do not substitute a header from a different accelerator geometry.
+```
+
+### Example D: quad-core Saturn + both Gemmini arrays, eye tracking, RVV packing
+
+For this example, we need to jump ahead to [Running on FireSim](#running-on-firesim) to elaborate the corresponding hardware configuration with Gemmini. The elaboration generates the Gemmini header files that we use here. Follow the instrucions through [Run elaboration without synthesis first](#run-elaboration-without-synthesis-first) where we set `XRSIGHT_FP32_HEADER` to its generated `gemmini_params_illixr.h`. Use the `FireSimILLIXRSingleRocketDualGemminiSaturnConfig` or `FireSimILLIXRQuadRocketDualGemminiSaturnConfig` configurations to get the requisite Gemmini headers.
+
+Additionally, verify that the generated `gemmini_params_illixr_int8.h` matches the bundled RITNet parameters in [third_party/ritnet/port/include/gemmini_params.h](third_party/ritnet/port/include/gemmini_params.h). Do not substitute a header from a different accelerator geometry.
+
+Build the OpenBLAS library mapping certain operations to FP32 Gemmini:
 
 ```bash
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/build_openblas.py" \
@@ -212,7 +343,9 @@ First elaborate the corresponding hardware configuration as described in [Runnin
   --build "$XRSIGHT_WORK/blas/openblas_gemmini_fp32" \
   --cc "$XRSIGHT_RVV_CC" --sysroot "$XRSIGHT_SYSROOT" \
   --backend openblas_gemmini_fp32 --gemmini-params "$XRSIGHT_FP32_HEADER" --jobs 4
-
+```
+Build the ELF:
+```
 export ZEPHYR_BASE="$XRSIGHT_WORK/vector-deps/zephyr"
 export XRSIGHT_BUILD="$XRSIGHT_WORK/build/quad-eye-rvvpack"
 cmake -S "$XRSIGHT_ROOT" -B "$XRSIGHT_BUILD" -G Ninja \
@@ -231,105 +364,52 @@ cmake -S "$XRSIGHT_ROOT" -B "$XRSIGHT_BUILD" -G Ninja \
   -DILLIXR_PACKING_SATURN_COMPAT=ON -DILLIXR_RITNET_DIAGNOSTICS=OFF
 cmake --build "$XRSIGHT_BUILD" --parallel 4
 ```
+The `ILLIXR_GEMMINI_PACKING` setting controls which backend is used to perform FP64->FP32 packing and conversion for use with the FP32 Gemmini. `scalar` remains the default, while `rvv` uses the Saturn Vector Unit to accelerate the packing. Explicit RVV packing fuses conversion with packing and supports signed strides/tails without rebuilding temporary arrays element by element in scalar C++. `rows` is the traversal tested in the complete FPGA pipeline; `contiguous` has standalone equivalence/benchmark evidence. 
 
-`ILLIXR_GEMMINI_PACKING=scalar` remains the default. Explicit RVV packing fuses conversion with packing and supports signed strides/tails without rebuilding temporary arrays element by element in scalar C++. `rows` is the traversal tested in the complete FPGA pipeline; `contiguous` has standalone equivalence/benchmark evidence. The accepted Saturn images require explicit `ILLIXR_PACKING_SATURN_COMPAT=ON` for the tested RVV conversion path. Scalar packing still requires Saturn for the backend's other BLAS operations.
+The tested Saturn images require explicit `ILLIXR_PACKING_SATURN_COMPAT=ON` for the tested RVV conversion path. Scalar packing still requires Saturn for the backend's other BLAS operations.
 
 For a single-core equivalent, change the quad configuration/overlay to their single-core versions and use the single-core dual-array image. For FP32-only hardware, select `profiles/gpu_pipeline.yaml`. For INT8-only hardware, keep the eye profile and select Eigen, scalar OpenBLAS, or RVV OpenBLAS instead of FP32 Gemmini.
-
-### Build outputs and preflight
-
-The firmware is `$XRSIGHT_BUILD/zephyr/zephyr.elf`. Preserve `.config`, `zephyr.dts`, `CMakeCache.txt`, generated dataset headers/manifest, the OpenBLAS build manifest, and hardware header hashes with each ELF. The tested quad eye firmware occupies approximately 194 MiB of RAM sections within the 256 MiB target; inspect each new link's memory report rather than assuming it fits.
-
-Build a **separate** preflight directory with the same arguments plus `-DILLIXR_PLATFORM_CHECK_ONLY=ON`. Preflight checks configured harts, atomics, timer progression, enabled vector state, and backend self-tests before exiting through HTIF. The required startup masks are `0x1`, `0x3`, and `0xF`. A failed preflight blocks that image's full workload. The platform-only ELF exits before starting plugins and therefore does not run RITNet inference. Standalone accelerator fixtures provide that additional coverage; full eye-enabled workloads must also pass the eye checks described below. See [Gemmini validation](docs/gemmini-openblas.md) and [eye tracking validation](docs/eye-tracking.rst).
-
-The default production profile retains batched trace export, all-operation RITNet fences, the 50 ms prediction horizon/stale policy, camera queue capacity 8, and independent 4,096-record IMU queues. The examples do not change estimator initialization, calibration, or queue policies.
 
 ## Running on FireSim
 
 ### Pinned source checkout and host setup
 
-The hardware manifest is [config/firesim/manifest.json](config/firesim/manifest.json). The published component repositories retain upstream history and licenses. Chipyard, Rocket, Saturn, and Shuttle repositories are public; HTTPS access does not require a GitHub account.
+Follow the [Chipyard Setup](#chipyard-setup) instructions from earlier; do not clone it again. If you built only Eigen or scalar OpenBLAS and skipped that step, it needs to be completed now.
 
-| Repository | Required revision |
-|---|---|
-| `pcg108/chipyard`, branch `fix/rocket-saturn-shuttle-rtl` | `621472a27a3ec8ce53af19af3b5e03fb96309d0c` |
-| `pcg108/rocket-chip` | `2c0e4784c46f1a67ef39699c7d67aef65e3ea8c0` |
-| `pcg108/saturn-vectors` | `9e04c8c6c70a4b4db5989f9a16a89679183a5d1d` |
-| `pcg108/shuttle` | `e789aa207148ade9eaed79f12841102597f5a0a5` |
-| `pcg108/firesim`, tested `trafficgen-xdma` base | `fa08b6cae659f88d00efb1a2d8c71be85aed97f8` |
-| Existing Gemmini project | `69a1c0383283d6ac95c99d2e53136fef4b0bb67e` |
-| Namespaced stock Gemmini source for these arrays | `8c3f9923a44a2fe2c7930587be297d6d4f8c09ca` |
-
-The parent revision pins the corrected CPU/vector components, but its FireSim pointer is **not** the FireSim revision used by the accepted FPGA images. Select that dependency explicitly:
+Note that we will to override the Firesim checkout in that Chipyard version to get the one used by the accepted FPGA images.
 
 ```bash
-git clone --branch fix/rocket-saturn-shuttle-rtl \
-  https://github.com/pcg108/chipyard.git "$CHIPYARD_DIR"
-git -C "$CHIPYARD_DIR" checkout --detach 621472a27a3ec8ce53af19af3b5e03fb96309d0c
 cd "$CHIPYARD_DIR"
-# Requires the normal Chipyard host/Conda prerequisites.
-# Skip optional indexing, precompilation, FireSim, FireMarshal, and cleanup here.
-# Use HTTPS for the public component URLs stored as SSH in the pinned .gitmodules.
-GIT_CONFIG_COUNT=1 \
-GIT_CONFIG_KEY_0=url.https://github.com/pcg108/.insteadOf \
-GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
-./build-setup.sh -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 11
 git submodule update --init sims/firesim
 git -C sims/firesim fetch https://github.com/pcg108/firesim.git fa08b6cae659f88d00efb1a2d8c71be85aed97f8
 git -C sims/firesim checkout --detach fa08b6cae659f88d00efb1a2d8c71be85aed97f8
 ./scripts/firesim-setup.sh
 git -C generators/gemmini fetch https://github.com/ucb-bar/gemmini.git 8c3f9923a44a2fe2c7930587be297d6d4f8c09ca
 
+# Additional patches provide streaming FIRRTL emission, correct unsigned 64-bit handling of the 100-billion-cycle limit, and U250 build-worker/report handling.
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/setup_firesim.py" install \
   --chipyard "$CHIPYARD_DIR"
 ```
 
-Do this in the isolated checkout, before elaboration. The installer verifies pinned revisions, checks file hashes, applies only the packaged patches, installs the Scala configurations, and creates the deterministic `illixr_fp32_gemmini` namespace. It is idempotent and refuses conflicting local files. `install --check` performs the revision/conflict check without writing. It does not fetch revisions or change Git branches for you.
 
-The additional patches provide streaming FIRRTL emission, correct unsigned 64-bit handling of the 100-billion-cycle limit, and U250 build-worker/report handling. They are build/host support, separate from the five published RTL fixes. Unrelated TrafficGen changes are not imported.
-
-Complete the [FireSim local FPGA host setup](https://docs.fires.im/en/latest/local-fpga-initial-setup/) and [U250 setup](https://docs.fires.im/en/latest/getting-started-guides/on-premises-fpga-getting-started/initial-setup/xilinx-alveo-u250/) for XDMA, device discovery, SSH to localhost, and FPGA permissions. Retain Vivado 2022.1 for the tested flow and use host tooling from the pinned checkout; the linked latest documentation may describe newer releases. Board provisioning or driver installation may require your host administrator; the project helpers do not perform those system changes.
+Complete the [FireSim local FPGA host setup](https://docs.fires.im/en/latest/local-fpga-initial-setup/) and [U250 setup](https://docs.fires.im/en/latest/getting-started-guides/on-premises-fpga-getting-started/initial-setup/xilinx-alveo-u250/) for XDMA, device discovery, SSH to localhost, and FPGA permissions. This flow is tested with Vivado 2022.1. Note that board provisioning, driver installation, or other `sudo` steps in the Firesim documentation may require your host administrator- the project helpers do not perform those system changes.
 
 ```bash
 cd "$CHIPYARD_DIR/sims/firesim"
 source sourceme-manager.sh
 export XRSIGHT_DEPLOY="$CHIPYARD_DIR/sims/firesim/deploy"
+
+# e.g. export XRSIGHT_FPGA_DB=/opt/firesim-db.json
 export XRSIGHT_FPGA_DB=/absolute/path/to/your/discovered-fpga-db.json
 ```
 
 Use the FPGA database generated for **your board**, selecting one U250. Do not copy another machine's PCI address or serial number. The following flow assumes the FPGA has already been provisioned for FireSim.
 
-### Recovering from the missing Conda lockfile error
-
-The earlier Chipyard pin (`974da28f4`) omitted the full Conda lockfile. The current pin packages it and checks for missing lockfiles before creating environments. Its Conda step was validated in an isolated checkout with both environment directories initially absent; package caches were available. GCC 13.2.0 and an FP64 RVV compilation check passed. This does not establish validation of every later README command from scratch.
-
-If your old setup printed `conda-lock install` usage and failed at step 1, update the checkout and preserve the partially created environments before retrying. Run this from the affected Chipyard checkout, with Conda available:
-
-```bash
-set -e
-git fetch origin fix/rocket-saturn-shuttle-rtl
-git checkout --detach 621472a27a3ec8ce53af19af3b5e03fb96309d0c
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate base
-conda_setup_backup=$(mktemp -d "$PWD/conda-setup-backup.XXXXXX")
-for directory in .conda-lock-env .conda-env; do
-  if [ -d "$directory" ]; then
-    mv "$directory" "$conda_setup_backup/"
-  fi
-done
-GIT_CONFIG_COUNT=1 \
-GIT_CONFIG_KEY_0=url.https://github.com/pcg108/.insteadOf \
-GIT_CONFIG_VALUE_0=git@github.com:pcg108/ \
-./build-setup.sh -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 11
-```
-
-The backup retains the old environment files for inspection; relocated Conda environments should not be used as working installations. The full lockfile preserves the development environment's resolved package set, including host sysroot 2.34. Chipyard's existing host-glibc-triggered lockfile regeneration remains unchanged; a regenerated lockfile represents a different solve.
-
 The installer also removes an optional TrafficGen trace dependency from the pinned FireChip sources. It also excludes unused TrafficGen driver sources and Boost serialization from XRSight host-driver builds. XRSight does not use this instrumentation; the clean pinned inclusive-cache lacks its parameter. If elaboration reports `InclusiveCacheTrafficGenTraceCycles` missing, update this repository and rerun the installer before retrying. See [the packaging notes](config/firesim/README.md#optional-trafficgen-trace-dependency). No Chipyard revision change is required.
 
 ### Hardware configurations
 
-`setup_firesim.py configure --help` lists the aliases. Choose one and retain that choice through elaboration, firmware, bitstream packaging, and runtime setup.
+Running `python "$XRSIGHT_ROOT/scripts/setup_firesim.py" configure --help` lists aliases for the following Hardware Configurations. Choose one and retain that choice through elaboration, firmware, bitstream packaging, and runtime setup.
 
 | Hardware | Single-core class | Multicore class |
 |---|---|---|
@@ -339,13 +419,13 @@ The installer also removes an optional TrafficGen trace dependency from the pinn
 | + INT8 Gemmini | `FireSimILLIXRSingleRocketInt8GemminiSaturnConfig` | `FireSimILLIXRQuadRocketInt8GemminiSaturnConfig` |
 | + both Gemmini arrays | `FireSimILLIXRSingleRocketDualGemminiSaturnConfig` | `FireSimILLIXRQuadRocketDualGemminiSaturnConfig` |
 
-The corresponding aliases are `illixr_u250_rocket_{single,dual,quad}`, and `illixr_u250_rocket_{saturn,gemmini_saturn,int8_gemmini_saturn,dual_gemmini_saturn}_{single,quad}`. Braces here describe alternatives; choose a single literal alias. The manifest also retains the separately investigated single/quad Shuttle+Saturn configurations; the primary instructions and accepted heterogeneous workload path use Rocket.
+The corresponding aliases are `illixr_u250_rocket_{single,dual,quad}`, and `illixr_u250_rocket_{saturn,gemmini_saturn,int8_gemmini_saturn,dual_gemmini_saturn}_{single,quad}`.
 
 All listed Rocket targets retain 256 MiB RAM, HTIF/TSI loading and exit, the 500 MHz/500 kHz generated ratio, default FireSim bridges without TracerV, and the tested FASED latency-bandwidth model. Saturn configurations use REFV256D128 on every hart.
 
 ### Elaborate and build the selected image
 
-Prepare build-only files before an ELF exists. The canonical example is quad-core dual Gemmini:
+Prepare build-only files. The canonical example is quad-core dual-Gemmini with Saturn:
 
 ```bash
 export XRSIGHT_HW=illixr_u250_rocket_dual_gemmini_saturn_quad
@@ -355,7 +435,7 @@ export XRSIGHT_HW_WORK="$XRSIGHT_WORK/hardware/$XRSIGHT_HW"
   --config "$XRSIGHT_HW" --build-only
 ```
 
-The renderer writes complete manager files with absolute paths, plus `commands.json` identifying the matching elaboration command, generated RTL, staging directory, and accelerator headers. Templates live in [config/firesim](config/firesim). They use JSON syntax, which is valid YAML; FireSim accepts these `.yaml` files directly. YAML does not expand shell variables.
+The renderer writes complete manager files with absolute paths, plus `commands.json` identifying the matching elaboration command, generated RTL, staging directory, and accelerator headers. Templates live in [config/firesim](config/firesim). They use JSON syntax, which is valid YAML; FireSim accepts these `.yaml` files directly. 
 
 The build recipe has this structure (the helper replaces `/ABS/...` with your paths):
 
@@ -376,9 +456,9 @@ illixr_u250_rocket_dual_gemmini_saturn_quad:
   bit_builder_recipe: /ABS/chipyard/sims/firesim/deploy/bit-builder-recipes/xilinx_alveo_u250.yaml
 ```
 
-`config_build.yaml` selects that alias in `builds_to_run`, an externally provisioned localhost build farm, and a private build directory. Use at most four workers. The supplied guard enforces a 48 GiB available-memory reserve, 64 GiB per-process RSS ceiling, and stop on a new kernel OOM kill; memory PSI is warning-only. A guard stop preserves artifacts and leaves a latch. It never silently restarts or relaxes limits. Build cleanup checks the guard's ownership tag, descendant relationships, and process identities; sharing a directory does not make another job eligible for cleanup.
+`config_build.yaml` selects that alias in `builds_to_run`, an externally provisioned localhost build farm, and a private build directory. These build recipe files will be used when [building the FPGA images](#build-the-fpga-image-from-the-prepared-recipes). 
 
-Run elaboration without synthesis first:
+#### Run elaboration without synthesis first:
 
 ```bash
 cd "$CHIPYARD_DIR/sims/firesim"
@@ -400,6 +480,10 @@ For another alias, use its exact `TARGET_CONFIG` from the table or the command a
 export XRSIGHT_STAGING="$CHIPYARD_DIR/sims/firesim-staging/generated-src/firechip.chip.FireSim.FireSimILLIXRQuadRocketDualGemminiSaturnConfig"
 export XRSIGHT_RTL="$CHIPYARD_DIR/sims/firesim/sim/generated-src/xilinx_alveo_u250/xilinx_alveo_u250-firesim-FireSim-FireSimILLIXRQuadRocketDualGemminiSaturnConfig-BaseXilinxAlveoU250Config/FireSim-generated.sv"
 export XRSIGHT_FP32_HEADER="$CHIPYARD_DIR/gemmini_params_illixr.h"
+```
+#### Sanity check elaborated RTL:
+
+```
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/check_firesim_platform.py" \
   --chipyard "$CHIPYARD_DIR" --config "$XRSIGHT_HW" \
   --staging-dir "$XRSIGHT_STAGING" --rtl "$XRSIGHT_RTL" \
@@ -420,7 +504,13 @@ export XRSIGHT_FIRMWARE="$XRSIGHT_WORK/artifacts/quad-eye-rvvpack"
 
 Use `--deps "$XRSIGHT_WORK/deps"` for scalar Zephyr builds. The helper records compiled settings, firmware/source/dependency hashes, dataset identity, memory/ELF reports, backend identity, and the BLAS symbol audit. It refuses an existing destination. Package the separate preflight build in its own artifact directory too.
 
-Build the FPGA image from the prepared recipes:
+#### Build the FPGA image from the prepared recipes:
+
+It is recommended to launch the following in a `tmux` session, after sourcing `sourceme-manager.sh`. 
+
+**Ensure that `vivado` is installed and accessible from the CLI before running the following**
+
+If one needs to re-run the following, delete the generated build directory and re-run the `setup_firesim.py` `--build-only` step from above.
 
 ```bash
 cd "$XRSIGHT_DEPLOY"
@@ -434,7 +524,11 @@ cd "$XRSIGHT_DEPLOY"
     -a "$XRSIGHT_HW_WORK/config_hwdb_build.yaml"
 ```
 
-This wrapper invokes the normal `firesim buildbitstream` manager while forwarding resource-ownership metadata to localhost build workers. Keep generated files and temporary build products in the isolated checkout/workspace. Use a separate Chipyard tree for each hardware configuration: generated accelerator header names are shared within a checkout. Do not lower Saturn/Gemmini parameters or change timing constraints automatically after a failed build.
+This wrapper invokes the normal `firesim buildbitstream` manager while forwarding resource-ownership metadata to localhost build workers. 
+
+In our experience, it is best to use at most four workers. The supplied guard enforces a 48 GiB available-memory reserve, 64 GiB per-process RSS ceiling, and stop on a new kernel OOM kill. These settings are based on our own experience building Firesim bitstreams. 
+
+Keep generated files and temporary build products in the isolated checkout/workspace. Use a separate Chipyard tree for each hardware configuration: generated accelerator header names are shared within a checkout. Do not lower Saturn/Gemmini parameters or change timing constraints automatically after a failed build.
 
 ### Timing, driver packaging, and HWDB
 
@@ -676,18 +770,26 @@ The report combines VIO, queues, BLAS/accelerators, eye tracking, display deadli
 placement, memory traffic, runtimes, and available per-plugin HPM measurements.
 Legacy measurements remain unavailable and incomplete runs remain incomplete.
 
-## Included plugins
 
-The complete profile contains these nine components. Links labeled **counterpart** describe the related desktop component, not an assertion that names or implementations are identical.
+## Citing XRSight
 
-| Plugin | Role | Documentation |
-|---|---|---|
-| `offline_imu` | Replays embedded angular-velocity/acceleration samples at their dataset timestamps into independent VIO and integration queues. Every selected IMU must reach both consumers. | [Upstream](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#offline_imu); [RTOS transport](docs/imu-value-transport.md) |
-| `offline_cam` | Decodes embedded stereo PNG pairs and publishes due grayscale images to VIO. Expired opportunities and full-queue drops are counted separately. | [Upstream](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#offline_cam) |
-| `openvins` | Consumes camera/IMU input, estimates visual-inertial pose, and publishes the latest pose and integration baseline. It is the principal configurable BLAS workload. | [Upstream `open_vins`](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#open_vins); [backend integration](docs/gemmini-openblas.md) |
-| `imu_integrator` | Propagates the latest VIO baseline through retained IMUs, publishing current pose and coherent state for prediction. | [Related upstream integrator](https://illixr.github.io/ILLIXR/latest/illixr_plugins/#rk4_integrator); [RTOS transport](docs/imu-value-transport.md) |
-| `pose_prediction` | Provides caller-thread RK4 prediction for a requested timestamp, including horizon and stale-state checks. It is an on-demand service, not another periodic publishing thread. | [Upstream service API](https://illixr.github.io/ILLIXR/latest/api/classILLIXR_1_1data__format_1_1pose__prediction/); [RTOS prediction](docs/gpu-pipeline.md) |
-| `eye_tracking` | Runs asynchronous RITNet on hart-0 INT8 Gemmini, reading the latest eye image and retaining each completed eye-position result for nonblocking consumers. | [RTOS implementation](docs/eye-tracking.rst); no corresponding official upstream plugin page found |
-| `offline_eye` | Republishes one embedded 240×160 eye sample at 120 Hz with timestamp/sequence metadata; pending inference notifications coalesce. | [RTOS implementation](docs/eye-tracking.rst); RTOS-specific image source |
-| `render_loop` | Requests a pose for the next display boundary and publishes an immutable dummy stereo-frame descriptor after its simulated GPU delay. | [Upstream scheduling counterpart: `gldemo`](https://illixr.github.io/ILLIXR/latest/plugin_README/README_gldemo/); [RTOS model](docs/gpu-pipeline.md) |
-| `timewarp` | Independently snapshots the latest completed frame, obtains a fresh pose and latest eye result, computes rotational correction, and models GPU completion. Frames and eye results can be reused. | [Upstream scheduling counterpart: `timewarp_gl`](https://illixr.github.io/ILLIXR/latest/plugin_README/README_timewarp_gl/); [RTOS model](docs/gpu-pipeline.md) |
+```
+@inproceedings{ganesh2025xrsight,
+  title={XRSight: An End-to-End Hardware-Software Co-Design Platform for XR SoC Evaluation},
+  author={Ganesh, Prashanth and Lin, Zekai and Shao, Yakun Sophia},
+  booktitle={2025 IEEE International Symposium on Workload Characterization (IISWC)},
+  pages={452--463},
+  year={2025},
+  organization={IEEE}
+}
+```
+
+## Contributors
+
+Prashanth Ganesh - prashanthcganesh108@berkeley.edu
+
+Zekai Lin - zekailin00@berkeley.edu
+
+Isaac Tsang - isaacmiltontsang@berkeley.edu
+
+Sophia Shao - ysshao@berkeley.edu
