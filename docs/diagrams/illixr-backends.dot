@@ -1,0 +1,32 @@
+digraph G {
+graph [rankdir=TB, nodesep=0.5, ranksep=0.8, splines=polyline, bgcolor=white];
+node [shape=box, style="rounded,filled", fontname=Helvetica, fontsize=12, margin="0.18,0.14", color="#64748b"];
+edge [fontname=Helvetica, fontsize=10, color="#475569", arrowsize=0.8];
+IMU [label="offline_imu\nCPU: timestamp-paced replay", fillcolor="#e8f1fb"];
+CAM [label="offline_cam\nCPU: timestamp-paced stereo replay", fillcolor="#e8f1fb"];
+VIO [label="OpenVINS\nCPU: FP64 estimator and image processing\nLinear algebra: Eigen / scalar OpenBLAS / RVV\nOpenBLAS\nor FP32 Gemmini with scalar or RVV packing", fillcolor="#fff0da"];
+INT [label="imu_integrator\nCPU: FP64 Eigen integration", fillcolor="#e8f1fb"];
+PP [label="pose_prediction\nCPU: prediction and quaternion math\nOn-demand service in caller's thread", fillcolor="#e8f1fb"];
+EYE [label="offline_eye\nCPU: repeated sample image at 120 Hz", fillcolor="#ecf7ec"];
+ET [label="eye_tracking / RITNet\nCPU worker on hart 0 + INT8 Gemmini custom2\nAsynchronous inference; fence after every\noperation", fillcolor="#ecf7ec"];
+CLOCK [label="Shared target clock / virtual vsync\nCLINT mtime + CPU scheduling\n120 Hz display timeline", fillcolor="#f1f3f5"];
+R [label="render_loop\nCPU scheduling + asynchronous GPU model\n6.944445 ms delay; dummy images", fillcolor="#eee9fa"];
+FRAME [label="Latest completed frame + saved render pose\nCPU RAM: retained immutable descriptor\nsnapshot", fillcolor="#f1f3f5"];
+W [label="timewarp\nCPU rotational correction + asynchronous GPU\nmodel\n1 ms delay; eye prediction read only", fillcolor="#eee9fa"];
+D [label="Main consumer / presentation probe\nCPU: timestamped completion history\nModeled presentation; no physical display", fillcolor="#f1f3f5"];
+IMU -> VIO [label="Dedicated IMU queue", style=solid];
+CAM -> VIO [label="Bounded stereo queue", style=solid];
+IMU -> INT [label="Separate IMU queue", style=solid];
+VIO -> INT [label="Latest VIO baseline\nsnapshot", style=solid];
+INT -> PP [label="Latest coherent prediction\nstate", style=solid];
+PP -> R [label="Requested prediction for\nfollowing vsync", style=solid];
+PP -> W [label="Fresh request for warp's\nown vsync", style=solid];
+EYE -> ET [label="Latest image snapshot;\nnotifications coalesce", style=solid];
+ET -> W [label="Latest completed eye\nprediction; new, reused, or\nunavailable", style=solid];
+CLOCK -> R [label="Vsync + 1 ms", style=dashed];
+CLOCK -> W [label="Upcoming vsync - 2 ms", style=dashed];
+R -> FRAME [label="Publish after modeled GPU\ncompletion", style=solid];
+FRAME -> W [label="Read snapshot; frame reuse\nallowed", style=solid];
+W -> D [label="Timestamped warp completion", style=solid];
+CLOCK -> D [label="Each vsync", style=dashed];
+}

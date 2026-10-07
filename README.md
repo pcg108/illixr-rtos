@@ -361,7 +361,9 @@ cmake -S "$XRSIGHT_ROOT" -B "$XRSIGHT_BUILD" -G Ninja \
   -DILLIXR_LINALG_BACKEND=openblas_gemmini_fp32 \
   -DILLIXR_OPENBLAS_ARCHIVE="$XRSIGHT_WORK/blas/openblas_gemmini_fp32/lib/libopenblas-zephyr.a" \
   -DILLIXR_GEMMINI_PACKING=rvv -DILLIXR_GEMMINI_PACKING_TRAVERSAL=rows \
-  -DILLIXR_PACKING_SATURN_COMPAT=ON -DILLIXR_RITNET_DIAGNOSTICS=OFF
+  -DILLIXR_PACKING_SATURN_COMPAT=ON \
+  -DILLIXR_RITNET_DIAGNOSTICS=OFF \
+  -DILLIXR_HPM_PROFILE=ON
 cmake --build "$XRSIGHT_BUILD" --parallel 4
 ```
 The `ILLIXR_GEMMINI_PACKING` setting controls which backend is used to perform FP64->FP32 packing and conversion for use with the FP32 Gemmini. `scalar` remains the default, while `rvv` uses the Saturn Vector Unit to accelerate the packing. Explicit RVV packing fuses conversion with packing and supports signed strides/tails without rebuilding temporary arrays element by element in scalar C++. `rows` is the traversal tested in the complete FPGA pipeline; `contiguous` has standalone equivalence/benchmark evidence. 
@@ -605,6 +607,7 @@ from the `deploy` directory, after packaging the quad-core workload:
 
 ```bash
 mkdir -p workloads/xrsight
+# the ELF can also just be copied directly from the build directory, e.g. $XRSIGHT_BUILD/zephyr/zephyr.elf
 cp ~/xrsight-work/artifacts/quad-eye-rvvpack/zephyr.elf workloads/xrsight/zephyr.elf
 ```
 
@@ -699,16 +702,7 @@ the bundled example. From `deploy`, run:
 ```bash
 cp -n sample-backup-configs/sample_config_build_recipes.yaml config_build_recipes.yaml
 ```
-
-`-n` preserves an existing file. This FireSim revision loads the recipe file even
-with `metasimulation_enabled: false`; leaving it absent causes a
-`FileNotFoundError`. For this FPGA run, the HWDB entry selected by
-`default_hw_config` still determines the hardware, not these sample recipes.
-Alternatively, pass `-r /absolute/path/to/config_build_recipes.yaml` to **both**
-commands below to reuse the recipe file from `buildbitstream`.
-
-Confirm that the U250 is idle; coordinate access if other users share it. From
-`deploy`, run:
+From `deploy`, run:
 
 ```bash
 firesim infrasetup -c config_runtime_xrsight.yaml -a config_hwdb.yaml
@@ -762,21 +756,34 @@ The firmware buffers records in RAM and transfers binary batches through HTIF. T
 Native validation uses the same local estimator implementation, dataset/calibration, and actual delivered camera/IMU sequence. It requires a **host** OpenCV 4.5.4 installation and Eigen ≥3.4; do not point native CMake at the RISC-V library. If those versions are not already installed, build the pinned sources into a private prefix:
 
 ```bash
+export XRSIGHT_WORK="$HOME/xrsight-work"
 export XRSIGHT_HOST_PREFIX="$XRSIGHT_WORK/host-deps"
-cmake -S "$XRSIGHT_WORK/deps/modules/lib/eigen" -B "$XRSIGHT_WORK/build/host-eigen" \
-  -DCMAKE_INSTALL_PREFIX="$XRSIGHT_HOST_PREFIX" -DBUILD_TESTING=OFF
-cmake --build "$XRSIGHT_WORK/build/host-eigen" --target install --parallel 4
-cmake -S "$XRSIGHT_WORK/deps/opencv" -B "$XRSIGHT_WORK/build/host-opencv" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$XRSIGHT_HOST_PREFIX" \
-  -DBUILD_LIST=core,imgproc,imgcodecs -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF \
-  -DBUILD_EXAMPLES=OFF -DBUILD_opencv_apps=OFF -DBUILD_JAVA=OFF \
-  -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_OPENCL=OFF -DWITH_IPP=OFF
-cmake --build "$XRSIGHT_WORK/build/host-opencv" --target install --parallel 4
+
+# use the host cmake
+/usr/bin/cmake --version
+
+cmake -S "$XRSIGHT_WORK/deps/modules/lib/eigen" \
+  -B "$XRSIGHT_WORK/build/host-eigen" \
+  -DCMAKE_INSTALL_PREFIX="$XRSIGHT_HOST_PREFIX" \
+  -DBUILD_TESTING=OFF
+
+cmake --build "$XRSIGHT_WORK/build/host-eigen" \
+  --target install --parallel 4
+
+cmake -S "$XRSIGHT_WORK/deps/opencv" \
+  -B "$XRSIGHT_WORK/build/host-opencv" \
+  -DWITH_PNG=ON -DBUILD_PNG=ON -DBUILD_ZLIB=ON \
+  -DWITH_VA=OFF -DWITH_VA_INTEL=OFF \
+  -DHAVE_VA=OFF -DHAVE_VA_INTEL=OFF
+
+cmake --build "$XRSIGHT_WORK/build/host-opencv" \
+  --target install --parallel 4
 
 export XRSIGHT_NATIVE="$XRSIGHT_WORK/build/native"
 cmake -S "$XRSIGHT_ROOT/tests/native" -B "$XRSIGHT_NATIVE" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$XRSIGHT_HOST_PREFIX" \
   -DPython3_EXECUTABLE="$XRSIGHT_PYTHON"
+
 cmake --build "$XRSIGHT_NATIVE" --target estimator_replay prediction_reference --parallel 4
 ```
 
@@ -784,20 +791,20 @@ These are ordinary host builds, with no Zephyr toolchain file. The native harnes
 
 ### Inspect results or run full acceptance checks
 
-The manual workflow above produces FireSim logs directly. For the complete
-acceptance report, use the [recorded-run workflow](docs/firesim-recorded-runs.md),
-which also captures hardware/firmware identity and execution metadata. Do not
-invent `case.json` or `execution.json` for a manual run merely to make the collector
-accept it.
-
-For a quick inspection of a manual run, use:
+To inspect and validate the logs from the firesim run, use:
 
 ```bash
 mkdir -p "$XRSIGHT_WORK/inspection"
+
 cp /home/illixrtest/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog "$XRSIGHT_WORK/inspection/console.log"
+
+# trace_batches.py modifies its input and retains the original as `console.batched.log`
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/trace_batches.py" "$XRSIGHT_WORK/inspection/console.log"
+
 "$XRSIGHT_NATIVE/estimator_replay" --dataset "$EUROC_MAV0" \
   --trace "$XRSIGHT_WORK/inspection/console.log" --output "$XRSIGHT_WORK/inspection/native.log"
+
+# analyze_spike.py` is shared across platforms despite its name
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/analyze_spike.py" "$XRSIGHT_WORK/inspection/console.log" \
   --native "$XRSIGHT_WORK/inspection/native.log" --dataset "$EUROC_MAV0" \
   --dataset-manifest "$XRSIGHT_FIRMWARE/dataset_manifest.json" \
@@ -805,8 +812,6 @@ cp /home/illixrtest/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog "$XRSIGHT_WO
   --require-platform --require-gpu --expected-timer-hz 1000000 \
   --expected-core-hz 1000000000 --output "$XRSIGHT_WORK/inspection/analysis.json"
 ```
-
-`trace_batches.py` modifies its input and retains the original as `console.batched.log`; always copy the raw UART first. `analyze_spike.py` is shared across platforms despite its name. The lower-level command does **not** replace the complete collector's execution-status, prediction-reference, and required-eye checks. Adjust hart/profile arguments when inspecting another configuration.
 
 ### Interpreting results
 
@@ -827,15 +832,14 @@ Per-plugin `work_counts` count specific processing events, not every function ca
 
 Pose prediction has separate per-caller counters for prediction requests/results. Eye tracking separately records image publications, completed inferences, and timewarp reads. Work counters measure work volume and observed placement, not CPU utilization or execution cost; use the HPM cycle/instruction counters for performance measurements.
 
-BLAS records distinguish caller harts from the hart-0 accelerator worker, operation counts/dimensions, mutex and queue waits, packing/unpacking, execution intervals, and scratch high-water use. These elapsed intervals can include preemption; they are not exclusive accelerator busy cycles. RVV kernel/packing counters and disassembly audits establish actual dispatch rather than relying only on ELF ISA flags.
+BLAS records distinguish caller harts from the hart-0 accelerator worker, operation counts/dimensions, mutex and queue waits, packing/unpacking, execution intervals, and scratch high-water use. These elapsed intervals can include preemption- they are not exclusive accelerator busy cycles. RVV kernel/packing counters and disassembly audits establish actual dispatch rather than relying only on ELF ISA flags.
 
-Graphics accounting permits frame reuse: completed renders are distinct selected plus never-selected frames; completed warps are first plus repeated frame uses; display slots are new output, repeated output, or no output. Inspect prediction validity/age, frame age, fresh on-time presentations, render/warp deadline misses, missed wake opportunities, and observer lateness separately. Finishing work after a deadline does not relabel it for a later slot. Some stale output during estimator drain is possible; acceptance requires fresh on-time modeled presentation as well.
+Graphics accounting permits frame reuse: completed renders are distinct selected plus never-selected frames. Completed warps are first plus repeated frame uses. Display slots are new output, repeated output, or no output. 
 
-Application time covers target processing; trace-export time covers deferred output; FireSim target cycles include the executed target interval reported by the simulator. Host runtime measures real simulation wall time and must be labeled with whether programming/setup/analysis are included. Spike's bounded instruction-step counter has different semantics and cannot supply a hardware speedup claim.
+Application time covers target processing. Trace-export time covers deferred output. FireSim target cycles include the executed target interval reported by the simulator. Host runtime measures real simulation wall time and must be labeled with whether programming/setup/analysis are included. Spike's bounded instruction-step counter has different semantics and cannot supply a hardware speedup claim.
 
 **Native agreement is runtime equivalence, not physical trajectory accuracy.** Ground-truth trajectory drift is reported separately. Live paced runs can deliver different camera sequences when backend performance changes, so compare each run against its own native replay and use controlled equal-work fixtures for kernel speedups.
 
-The most recent [RVV packing FPGA matrix](docs/rvv-gemmini-packing.rst) passed twelve full pipelines: three scalar/RVV pairs on single-core FP32 Gemmini and three on quad-core dual Gemmini with asynchronous eye tracking. Conversion time decreased, but the single-core application time was essentially unchanged and quad-core application time fell 3.80%; these are workload-specific observations, not assumed accelerator speedups. [Reproducibility checks](docs/reproducibility-validation.md) distinguish the new build/setup checks from these prior FPGA measurements. Historical interrupted Spike/Verilator tests remain incomplete.
 
 ### Hardware performance profiling
 
@@ -877,7 +881,9 @@ bound on profiler overhead, rather than exact causal attribution of every event.
 Summarize preserved run directories or a matrix with one command:
 
 ```sh
-python3 scripts/summarize_performance.py /path/to/results --output /path/to/report
+"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/summarize_performance.py" \
+  "$HOME/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog" \
+  --output "$HOME/xrsight-work/reports/quad-eye-1"
 ```
 
 The report combines VIO, queues, BLAS/accelerators, eye tracking, display deadlines,

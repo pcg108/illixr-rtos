@@ -1,5 +1,11 @@
 # OpenBLAS integration and validation
 
+> Historical integration record. Status statements below describe the initial
+> scalar/RVV campaign, including investigations that have since completed.
+> Use the [primary README](../README.md) for current dependencies, all four
+> backends, and reproducible commands; see [FP32 Gemmini](gemmini-openblas.md)
+> and [RVV packing results](rvv-gemmini-packing.rst) for subsequent acceptance.
+
 The optional `ILLIXR_LINALG_BACKEND` CMake setting selects `eigen` (default),
 `openblas_scalar`, or `openblas_rvv`. Scalar firmware has passed single- and quad-core Spike validation. The full RVV
 pipeline has also passed on one and four Spike harts. See

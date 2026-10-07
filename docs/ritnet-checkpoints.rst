@@ -119,3 +119,94 @@ Host regression tests are in ``tests/native/test_ritnet_checkpoints.py`` and
 registered with CTest. They cover logical ordering, partial concatenations,
 in-place input export, capture/record bounds, malformed/duplicate/missing
 records, first-divergence selection, and bounded drain-set reduction.
+
+Corrected-Rocket preflight recovery (2026-10-03)
+----------------------------------------------
+
+The corrected-cache FPGA matrix initially selected the original two-inference
+standalone preflight, which predates operation-boundary diagnostics and has no
+operation-31 completion drain. Its second inference failed on the INT8-only
+single-core image. Passing diagnostic workloads do not qualify that unfenced
+firmware: their mode-2 drain masks explicitly select operation 31 or all 64
+boundaries.
+
+On the same corrected INT8-only image, the preserved post-failure diagnostic
+firmware reproduced the known failure at inference 7 with no additional drains.
+The captured operation-32 tensor was byte-identical to the earlier failing tensor
+(SHA256 ``4e3ff154c49794d6bb30d16d4944da2ca859d43173918d984e6565b4d264e2f9``):
+149 of 4800 bytes differed. Completed operation-31 inputs/output, operation-32
+inputs, image, immutable assets, and guards matched. A same-layout ELF differing
+only in one byte of ``ritnet_diag_drain_mask`` passed 32/32 exact full-output
+comparisons when operation 31 was drained. Timer preemption and vector-context
+checks remained enabled. These are completed-inference observations, not direct
+traces of accelerator DMA reads.
+
+FireSim cases may now explicitly declare ``ritnet_inferences`` (1 through 32).
+The count must match the hashed firmware's diagnostic-variant manifest. Default
+legacy cases still require two inferences. Every declared inference requires an
+ordered result, an exact full-tensor comparison, hart-zero accelerator ownership,
+and timer progress. Normal HTIF exit and vector checks remain required.
+
+The remaining matrix uses explicit mode-2, operation-31, 32-inference diagnostic
+preflights before running the unchanged paired full workloads. The failed legacy
+preflight remains recorded as failed. This recovery changes host validation and
+artifact selection; it does not add a production RITNet fence or change RTL.
+
+Evidence directory:
+``/scratch/prashanth_illixr_fixed_rocket_matrix_20261002T211704Z/preflight-debug``.
+It preserves the ELF audit, same-layout comparison, unfenced capture, passing
+control, isolated quad preflight build, and original matrix state before resume.
+
+The corrected-hardware matrix subsequently completed all 12 full workloads and
+all four platform preflights. See ``ritnet-fence-matrix-results.rst`` for the
+final comparison and ``completion-audit.json`` in the evidence directory's
+parent for the artifact and acceptance audit. The unfenced legacy failure is
+retained; completion applies to the explicitly fenced diagnostic matrix.
+
+Production completion policy
+----------------------------
+
+RITNet now unconditionally calls ``gemmini_fence()`` after each of the 64
+catalogued tensor-producing operations. These boundaries apply with
+``ILLIXR_RITNET_DIAGNOSTICS=OFF`` and complete output transfers before subsequent
+consumers or workspace reuse. The original graph calls, weights, scales, and
+quantization are unchanged. Eye inference remains asynchronous on hart 0;
+timewarp continues reading the most recently published prediction.
+
+Production has no diagnostic 32-inference cap. Normal end-of-stream and the
+existing bounded trace storage still govern lifetime. Eye configuration records
+identify ``completion_fence_policy=every_operation``, 64 operation fences,
+``diagnostics=false`` and ``inference_limit=0`` (no diagnostic cap).
+
+The optional diagnostic drain mask now adds drains on top of these mandatory
+boundaries: clearing it no longer recreates unfenced execution. Use the preserved
+historical ELFs and source snapshots for the earlier unfenced/op31-only controls.
+``scripts/instrument_ritnet.py --check`` verifies unconditional fence coverage and
+unchanged graph calls against the operation catalog.
+
+Production validation (2026-10-03)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All six full-pipeline FireSim cases passed using normal firmware with diagnostics
+disabled: RVV on single/quad INT8-only and dual-array Rocket+Saturn images, and
+FP32 OpenBLAS on single/quad dual-array images. Quad-core cases produced 43 exact
+reference eye predictions each, exceeding the former diagnostic cap; single-core
+RVV cases produced 16 each and single-core FP32 produced 17. Every case delivered
+501 IMUs to both consumers, accounted for all 50 camera pairs, passed the existing
+native pose and prediction/transform checks, and reported zero render/timewarp
+deadline misses with fresh presentations. There were 10 VIO poses in each
+single-core case and 15 in each quad-core case.
+
+The four firmware ELFs each contain 64 operation fences plus the original final
+inference fence and no diagnostic runtime symbols. 86 native host tests passed.
+The first INT8-only quad-core attempt was interrupted during host setup and is
+retained as incomplete; the clean retry passed with the same firmware. No
+resource limit was exceeded. Build supervisor cleanup scope and the recovery are
+recorded with the artifacts.
+
+Firmware, source manifests, disassembly, complete traces, comparisons and the
+closing audit are preserved in
+``/scratch/prashanth_illixr_ritnet_production_fences_20261003T173244Z/``;
+see ``production-validation.rst`` and ``completion-audit.json``. Prior diagnostic
+firmware/results remain unchanged. These runs validate production behavior;
+they are not new paired measurements of incremental fence overhead.

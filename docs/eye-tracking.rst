@@ -1,6 +1,13 @@
 INT8 eye tracking integration
 ============================
 
+.. note::
+
+   Use the `primary README <../README.md>`_ for the current reproducible setup
+   and `completed fence matrix <ritnet-fence-matrix-results.rst>`_ for later FPGA
+   acceptance. The hardware/gate discussion below preserves the original
+   validation sequence and includes historical in-progress statements.
+
 Select ``profiles/eye_tracking.yaml`` to enable the eye plugins alongside the
 existing VIO, prediction, render and timewarp pipeline. The default profile is
 unchanged. ``offline_eye`` publishes a descriptor for one embedded, already

@@ -6,24 +6,54 @@ integrator pipeline. The default placement is scheduler-managed.
 
 ```mermaid
 flowchart TD
-    IMU[offline_imu] --> VIO[OpenVINS]
-    CAM[offline_cam] --> VIO
-    IMU --> INT[IMU integrator]
-    VIO -->|VIO baseline| INT
-    INT --> STATE[Latest coherent prediction state]
-    STATE --> PP[On-demand pose prediction]
-    CLOCK[Shared target clock: vsync n × period] -.->|vsync + 1 ms| R[Render worker]
-    CLOCK -.->|next vsync - GPU time - 1 ms| W[Timewarp worker]
-    PP -->|Prediction for following vsync| R
-    R --> RG[6.944445 ms asynchronous GPU delay]
-    RG --> F[Retained latest completed frame + saved render pose]
-    F -->|Copy snapshot; image reuse allowed| W
-    PP -->|Fresh prediction for warp's own vsync| W
-    W --> WG[Rotational transform + 1 ms asynchronous GPU delay]
-    WG --> H[Timestamped warp completion history]
-    H --> D[Existing main probe: modeled presentation at each vsync]
-    CLOCK -.-> D
+    IMU["offline_imu<br/>CPU: timestamp-paced replay"]
+    CAM["offline_cam<br/>CPU: timestamp-paced stereo replay"]
+    VIO["OpenVINS<br/>CPU: FP64 estimator and image processing<br/>Linear algebra: Eigen / scalar OpenBLAS / RVV OpenBLAS<br/>or FP32 Gemmini with scalar or RVV packing"]
+    INT["imu_integrator<br/>CPU: FP64 Eigen integration"]
+    PP["pose_prediction<br/>CPU: prediction and quaternion math<br/>On-demand service in caller's thread"]
+    EYE["offline_eye<br/>CPU: repeated sample image at 120 Hz"]
+    ET["eye_tracking / RITNet<br/>CPU worker on hart 0 + INT8 Gemmini custom2<br/>Asynchronous inference; fence after every operation"]
+    CLOCK["Shared target clock / virtual vsync<br/>CLINT mtime + CPU scheduling<br/>120 Hz display timeline"]
+    R["render_loop<br/>CPU scheduling + asynchronous GPU model<br/>6.944445 ms delay; dummy images"]
+    FRAME["Latest completed frame + saved render pose<br/>CPU RAM: retained immutable descriptor snapshot"]
+    W["timewarp<br/>CPU rotational correction + asynchronous GPU model<br/>1 ms delay; eye prediction read only"]
+    D["Main consumer / presentation probe<br/>CPU: timestamped completion history<br/>Modeled presentation; no physical display"]
+
+    IMU -->|Dedicated IMU queue| VIO
+    CAM -->|Bounded stereo queue| VIO
+    IMU -->|Separate IMU queue| INT
+    VIO -->|Latest VIO baseline snapshot| INT
+    INT -->|Latest coherent prediction state| PP
+    PP -->|Requested prediction for following vsync| R
+    PP -->|Fresh request for warp's own vsync| W
+    EYE -->|Latest image snapshot; notifications coalesce| ET
+    ET -->|Latest completed eye prediction; new, reused, or unavailable| W
+    CLOCK -.->|Vsync + 1 ms| R
+    CLOCK -.->|Upcoming vsync - 2 ms| W
+    R -->|Publish after modeled GPU completion| FRAME
+    FRAME -->|Read snapshot; frame reuse allowed| W
+    W -->|Timestamped warp completion| D
+    CLOCK -.->|Each vsync| D
 ```
+
+The diagram includes the `eye_tracking` profile, which extends `gpu_pipeline`.
+Backend labels describe implemented execution paths, not interchangeable choices
+for every plugin. OpenBLAS is configured application-wide; eligible Eigen BLAS
+operations share that backend, while small fixed-size Eigen operations generally
+remain CPU operations. OpenVINS is the principal BLAS workload. Its FP32 Gemmini
+path retains FP64 estimator state and converts inputs/results using selectable
+scalar or RVV packing; accelerator commands run through the shared hart-0 worker
+using custom3. RITNet uses the separate INT8 custom2 array directly, bypassing
+OpenBLAS. Its CPU reference is a validation tool, not a selectable production
+plugin backend.
+
+Eye tracking runs in an independent hart-0 worker. New images replace the retained
+image snapshot and coalesce notifications; inference does not queue every image.
+On completion, it publishes the latest eye prediction. Timewarp reads that retained
+prediction without waiting for inference and may reuse it or find none at startup.
+The eye result is currently recorded but does not alter the warp or dummy pixels.
+Neither render nor timewarp executes real GPU shaders.
+
 
 Prediction is a service called independently by the two workers, as in the
 desktop implementation. It does not wait for new sensor or VIO publications.

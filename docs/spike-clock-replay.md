@@ -1,5 +1,12 @@
 # Clock-paced replay on Spike
 
+> Historical first clock-paced implementation. Its 1 kHz tick and pointer-queue
+> descriptions below predate the current 10 kHz ticks and value-based IMU
+> transport. Use the [primary README](../README.md),
+> [current clock settings](current-baseline.md), and
+> [IMU transport](imu-value-transport.md) for new builds. Spike still has its
+> own 10 MHz timer; the Rocket/FireSim factor-two model is platform-specific.
+
 The active `imu` profile runs independently scheduled IMU and camera producers,
 VIO, and IMU integration. A 120 Hz consumer probe reads current pose snapshots;
 this configuration does not include rendering or a new pose-prediction algorithm.
