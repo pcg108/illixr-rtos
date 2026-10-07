@@ -403,6 +403,22 @@ export XRSIGHT_DEPLOY="$CHIPYARD_DIR/sims/firesim/deploy"
 export XRSIGHT_FPGA_DB=/absolute/path/to/your/discovered-fpga-db.json
 ```
 
+On a fresh checkout, initialize the manager once before editing its configuration
+files. From the sourced FireSim environment:
+
+```bash
+cd "$XRSIGHT_DEPLOY"
+firesim managerinit --platform xilinx_alveo_u250
+```
+
+This creates `config_build.yaml`, `config_build_recipes.yaml`, `config_hwdb.yaml`,
+and `config_runtime.yaml` in `deploy/`. Do this before customizing those files:
+`managerinit` backs up existing versions into `sample-backup-configs/` and replaces
+them with examples. The project-specific build files generated below are separate.
+If you already built an image and only lack `config_hwdb.yaml`, create that file
+and paste the generated HWDB entry into it; you do not need to rerun initialization
+or rebuild the image.
+
 Use the FPGA database generated for **your board**, selecting one U250. Do not copy another machine's PCI address or serial number. The following flow assumes the FPGA has already been provisioned for FireSim.
 
 The installer also removes an optional TrafficGen trace dependency from the pinned FireChip sources. It also excludes unused TrafficGen driver sources and Boost serialization from XRSight host-driver builds. XRSight does not use this instrumentation; the clean pinned inclusive-cache lacks its parameter. If elaboration reports `InclusiveCacheTrafficGenTraceCycles` missing, update this repository and rerun the installer before retrying. See [the packaging notes](config/firesim/README.md#optional-trafficgen-trace-dependency). No Chipyard revision change is required.
@@ -514,7 +530,7 @@ If one needs to re-run the following, delete the generated build directory and r
 
 ```bash
 cd "$XRSIGHT_DEPLOY"
-# python3 here is the Python from the sourced FireSim manager environment.
+
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/firesim_resource_guard.py" \
   --scratch "$XRSIGHT_WORK" --run-dir "$XRSIGHT_HW_WORK/build-guard" \
   --latch "$XRSIGHT_HW_WORK/build-stopped.json" --jobs 4 -- \
@@ -532,11 +548,10 @@ Keep generated files and temporary build products in the isolated checkout/works
 
 ### Run the built image
 
-The normal FireSim workflow is: **copy the build's HWDB entry, select the hardware
-and ELF in the runtime files, run `infrasetup`, then run `runworkload`.** You do
-not need our hardware-manifest generator or driver-packaging helper for this path.
+Now, follow the normal FireSim workflow: **copy the build's HWDB entry, select the hardware
+and ELF in the runtime files, run `infrasetup`, then run `runworkload`.** 
 
-The examples below use `/home/illixrtest/xrsight-work` and a quad-core dual-Gemmini
+The examples below use `/home/illixrtest/xrsight-work` and a quad-core Rocket+Saturn dual-Gemmini
 image. Replace that home directory with yours. Run FireSim commands from
 `chipyard/sims/firesim/deploy` after sourcing `sourceme-manager.sh` as described
 above. YAML paths must be literal paths: `$HOME`, `$XRSIGHT_WORK`, and `~` are not
@@ -546,7 +561,9 @@ expanded inside YAML.
 
 At the end of `firesim buildbitstream`, FireSim prints an entry to add to
 `config_hwdb.yaml`. It also saves it under `deploy/built-hwdb-entries/`.
-**Copy that entire entry into `deploy/config_hwdb.yaml`.** Keep its
+**Copy that entire entry into `deploy/config_hwdb.yaml` (create the file if it
+does not exist).** No template is required: the generated entry is valid HWDB YAML
+on its own. Keep its
 `bitstream_tar` path and `deploy_quintuplet_override` exactly as generated.
 For this example its name is `illixr_u250_rocket_dual_gemmini_saturn_quad`.
 
