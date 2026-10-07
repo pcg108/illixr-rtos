@@ -402,6 +402,7 @@ export XRSIGHT_DEPLOY="$CHIPYARD_DIR/sims/firesim/deploy"
 # e.g. export XRSIGHT_FPGA_DB=/opt/firesim-db.json
 export XRSIGHT_FPGA_DB=/absolute/path/to/your/discovered-fpga-db.json
 ```
+Use the FPGA database generated for **your board**, selecting one U250. Do not copy another machine's PCI address or serial number. The following flow assumes the FPGA has already been provisioned for FireSim.
 
 On a fresh checkout, initialize the manager once before editing its configuration
 files. From the sourced FireSim environment:
@@ -415,13 +416,11 @@ This creates `config_build.yaml`, `config_build_recipes.yaml`, `config_hwdb.yaml
 and `config_runtime.yaml` in `deploy/`. Do this before customizing those files:
 `managerinit` backs up existing versions into `sample-backup-configs/` and replaces
 them with examples. The project-specific build files generated below are separate.
-If you already built an image and only lack `config_hwdb.yaml`, create that file
-and paste the generated HWDB entry into it; you do not need to rerun initialization
-or rebuild the image.
-
-Use the FPGA database generated for **your board**, selecting one U250. Do not copy another machine's PCI address or serial number. The following flow assumes the FPGA has already been provisioned for FireSim.
-
-The installer also removes an optional TrafficGen trace dependency from the pinned FireChip sources. It also excludes unused TrafficGen driver sources and Boost serialization from XRSight host-driver builds. XRSight does not use this instrumentation; the clean pinned inclusive-cache lacks its parameter. If elaboration reports `InclusiveCacheTrafficGenTraceCycles` missing, update this repository and rerun the installer before retrying. See [the packaging notes](config/firesim/README.md#optional-trafficgen-trace-dependency). No Chipyard revision change is required.
+If you already built an image without running `managerinit`, you do not need to
+rerun initialization or rebuild. Create `config_hwdb.yaml` and paste the generated
+HWDB entry into it. Also supply `config_build_recipes.yaml` as described under
+[Program and run](#4-program-and-run): this FireSim revision loads recipes even
+when metasimulation is disabled.
 
 ### Hardware configurations
 
@@ -544,7 +543,20 @@ This wrapper invokes the normal `firesim buildbitstream` manager while forwardin
 
 In our experience, it is best to use at most four workers. The supplied guard enforces a 48 GiB available-memory reserve, 64 GiB per-process RSS ceiling, and stop on a new kernel OOM kill. These settings are based on our own experience building Firesim bitstreams. 
 
-Keep generated files and temporary build products in the isolated checkout/workspace. Use a separate Chipyard tree for each hardware configuration: generated accelerator header names are shared within a checkout. Do not lower Saturn/Gemmini parameters or change timing constraints automatically after a failed build.
+The bitstream build will take several hours. Afterwards, the console will display something like:
+
+```
+Your bitstream has been created!
+Add
+
+illixr_u250_rocket_dual_gemmini_saturn_quad:
+    bitstream_tar: file:///home/illixrtest/xrsight-work/chipyard/sims/firesim/deploy/results-build/2026-10-07--00-19-16-illixr_u250_rocket_dual_gemmini_saturn_quad/cl_xilinx_alveo_u250-firesim-FireSim-FireSimILLIXRQuadRocketDualGemminiSaturnConfig-BaseXilinxAlveoU250Config/firesim.tar.gz
+    deploy_quintuplet_override: null
+    custom_runtime_config: null
+
+to your config_hwdb.yaml to use this hardware configuration.
+
+```
 
 ### Run the built image
 
@@ -567,11 +579,6 @@ on its own. Keep its
 `bitstream_tar` path and `deploy_quintuplet_override` exactly as generated.
 For this example its name is `illixr_u250_rocket_dual_gemmini_saturn_quad`.
 
-Leave `custom_runtime_config: null`; the tested memory settings are supplied in
-the runtime YAML below. You can omit `driver_tar`: FireSim builds/packages the
-matching host driver during `infrasetup` using this checkout. Keep the same
-patched source checkout used to build the image. You do not need to create a
-driver archive by hand.
 
 Before programming, confirm that the Vivado implementation reports show completed
 routing and passing final setup/hold and bus-skew timing. The optional
@@ -685,6 +692,20 @@ our accepted runs. For each new run, change the run folder and `suffix_tag` so
 previous output is preserved. For preflight, use names such as `quad-preflight-1`.
 
 #### 4. Program and run
+
+If you skipped `managerinit`, first create the missing default recipe file from
+the bundled example. From `deploy`, run:
+
+```bash
+cp -n sample-backup-configs/sample_config_build_recipes.yaml config_build_recipes.yaml
+```
+
+`-n` preserves an existing file. This FireSim revision loads the recipe file even
+with `metasimulation_enabled: false`; leaving it absent causes a
+`FileNotFoundError`. For this FPGA run, the HWDB entry selected by
+`default_hw_config` still determines the hardware, not these sample recipes.
+Alternatively, pass `-r /absolute/path/to/config_build_recipes.yaml` to **both**
+commands below to reuse the recipe file from `buildbitstream`.
 
 Confirm that the U250 is idle; coordinate access if other users share it. From
 `deploy`, run:
