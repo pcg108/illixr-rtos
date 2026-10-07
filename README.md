@@ -2,10 +2,10 @@
 
 XRSight-RTOS brings an ILLIXR-based extended-reality workload to Zephyr RTOS and heterogeneous RISC-V SoCs. It connects sensor traces, pose estimation, rendering schedules, and eye inference to the processor, memory system, and accelerators executing it in cycle-accurate simulation. This is a major revision to [XRSight](https://github.com/ucb-bar/xrsight), which combines [ILLIXR](https://illixr.github.io/ILLIXR/), [Chipyard](https://chipyard.readthedocs.io/), and [FireSim](https://docs.fires.im/) for XR hardware/software co-design. See the [original IISWC 2025 paper](https://ieeexplore.ieee.org/document/11242088) for the project background.
 
-The runtime boots directly as a Zephyr ELF. Tested systems include single-, dual-, and quad-core Rocket, Saturn vector units, FP32 Gemmini for selected OpenBLAS operations, and INT8 Gemmini for RITnet eye inference. Multicore workers execute concurrently and accelerator requests are routed to the hart that owns each array.
+The runtime boots directly as a Zephyr ELF. Tested systems include single-, dual-, and quad-core Rocket, Saturn vector units for OpenBLAS operations, FP32 Gemmini for selected OpenBLAS operations, and INT8 Gemmini for RITnet eye inference. 
 
-Other implementation notes:
-The current graphics stages model asynchronous GPU latency and publish **dummy image descriptors**. Timewarp computes a CPU rotational correction, but neither stage runs shaders or produces real rendered pixels. We plan to extend this to GPU memory behavior modeling or the original XRSight blackbox GPU model. RITNet returns an image-space foreground centroid, not a calibrated gaze vector; timewarp records that result without changing its pixels. No desktop renderer or host GPU worker is required for this flow.
+*Other implementation notes:*
+The current graphics stages model asynchronous GPU latency and publish **dummy image descriptors**. Timewarp computes a CPU rotational correction, but neither stage runs shaders or produces real rendered pixels. We plan to extend this to GPU memory behavior modeling or the original XRSight blackbox GPU model. Additionally, RITNet returns an image-space foreground centroid, not a calibrated gaze vector and timewarp records that result without changing its pixels. No desktop renderer or host GPU worker is required for this flow.
 
 ![XRSight-RTOS data flow and available backends](docs/diagrams/eye-tracking-flow.png)
 
@@ -229,7 +229,7 @@ These are the provided Chipyard configurations in XRSight-RTOS:
 | Rocket + Saturn + INT8 Gemmini | 1, 4 | Eigen, scalar or RVV OpenBLAS | Yes |
 | Rocket + Saturn + FP32 + INT8 Gemmini | 1, 4 | All four | Yes |
 
-The majority of our experimentation was done on single and quad core Rocket with Saturn and the 2 Gemmini configurations. Different configurations can be built using standard Chipyard build procedures. Generally, the guidance for building new SoCs is that Saturn attached to every Rocket core is required to use the RVV backends, and the Gemmini configurations are assumed to be attached to hart 0. 
+The majority of our experimentation was done on single and quad core Rocket with Saturn and the 2 Gemmini configurations. Different configurations can be built using standard Chipyard build procedures. Generally, the guidance for building new SoCs is that Saturn attached to every Rocket core is required to use the RVV backends. Multicore workers execute concurrently and accelerator requests are routed to the hart that owns each array. Here, the Gemmini configurations are assumed to be attached to hart 0.
 
 FP32 Gemmini uses custom3, a 4×4 array, 32 KiB scratchpad and 8 KiB accumulators. INT8 Gemmini uses custom2, a 16×16 array, 256 KiB scratchpad and 64 KiB accumulators. Both attach only to hart 0. Each has its own priority-5 worker thread (lowest Zephyr scheduler priority), and only that worker issues its array's instructions. FP32 calls use a globally serialized, aligned 32 MiB BLAS arena. RITNet has separate static activations and publishes results asynchronously. 
 
