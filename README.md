@@ -812,7 +812,22 @@ cp /home/illixrtest/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog "$XRSIGHT_WO
 
 A passing full workload requires normal HTIF exit, orderly shutdown, complete trace export, initialized finite VIO output, normalized quaternions, ordered timestamps, all **501 IMUs at both consumers**, and accounting for all **50 camera pairs** as processed/skipped/dropped. Native replay must remain within **1 mm position and 0.001 rad orientation** for that run's delivered input sequence. Enabled accelerator/vector self-tests and prediction/transform checks must pass. Eye-enabled runs additionally validate inference outputs, routing, and asynchronous publication/consumption.
 
-Per-plugin work counters report actual processing/publication harts. BLAS records distinguish caller harts from the hart-0 accelerator worker, operation counts/dimensions, mutex and queue waits, packing/unpacking, execution intervals, and scratch high-water use. These elapsed intervals can include preemption; they are not exclusive accelerator busy cycles. RVV kernel/packing counters and disassembly audits establish actual dispatch rather than relying only on ELF ISA flags.
+Per-plugin `work_counts` count specific processing events, not every function call or thread wakeup:
+
+| Plugin | One `work_counts` increment represents |
+|---|---|
+| `offline_imu` | One IMU sample delivered |
+| `offline_cam` | One decoded stereo pair offered to the VIO queue, including attempts dropped because the queue is full |
+| `openvins` | One IMU sample **or** one stereo pair processed |
+| `imu_integrator` | One IMU sample processed |
+| `render_loop` | One render job submitted |
+| `timewarp` | One warp job submitted; empty or missed display opportunities do not count |
+
+`publication_counts` separately count output publications. For example, OpenVINS processing 501 IMUs and 17 stereo pairs records 518 work events, but could publish only 15 poses. Both arrays are indexed by hart: `[100, 200, 150, 68]` records events observed on harts 0–3. These observations identify the hart at each instrumented point; a thread can migrate during an operation.
+
+Pose prediction has separate per-caller counters for prediction requests/results. Eye tracking separately records image publications, completed inferences, and timewarp reads. Work counters measure work volume and observed placement, not CPU utilization or execution cost; use the HPM cycle/instruction counters for performance measurements.
+
+BLAS records distinguish caller harts from the hart-0 accelerator worker, operation counts/dimensions, mutex and queue waits, packing/unpacking, execution intervals, and scratch high-water use. These elapsed intervals can include preemption; they are not exclusive accelerator busy cycles. RVV kernel/packing counters and disassembly audits establish actual dispatch rather than relying only on ELF ISA flags.
 
 Graphics accounting permits frame reuse: completed renders are distinct selected plus never-selected frames; completed warps are first plus repeated frame uses; display slots are new output, repeated output, or no output. Inspect prediction validity/age, frame age, fresh on-time presentations, render/warp deadline misses, missed wake opportunities, and observer lateness separately. Finishing work after a deadline does not relabel it for a later slot. Some stale output during estimator drain is possible; acceptance requires fresh on-time modeled presentation as well.
 
