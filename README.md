@@ -372,9 +372,9 @@ For a single-core equivalent, change the quad configuration/overlay to their sin
 
 ## Running on FireSim
 
-### Pinned source checkout and host setup
+### Source checkout and host setup
 
-Follow the [Chipyard Setup](#chipyard-setup) instructions from earlier; do not clone it again. If you built only Eigen or scalar OpenBLAS and skipped that step, it needs to be completed now.
+Follow the [Chipyard Setup](#chipyard-setup) instructions from earlier- do not clone it again! If you built only Eigen or scalar OpenBLAS and skipped that step, it needs to be completed now.
 
 Note that we will to override the Firesim checkout in that Chipyard version to get the one used by the accepted FPGA images.
 
@@ -530,111 +530,179 @@ In our experience, it is best to use at most four workers. The supplied guard en
 
 Keep generated files and temporary build products in the isolated checkout/workspace. Use a separate Chipyard tree for each hardware configuration: generated accelerator header names are shared within a checkout. Do not lower Saturn/Gemmini parameters or change timing constraints automatically after a failed build.
 
-### Timing, driver packaging, and HWDB
+### Run the built image
 
-FireSim writes a proposed entry under `deploy/built-hwdb-entries/` and results under `deploy/results-build/`. The local build directory contains `cl_<deploy-quintuplet>/firesim.tar.gz`, `driver/`, and `vivado_proj/`. Locate it under the rendered build directory (for example with `find "$XRSIGHT_HW_WORK/builds" -name firesim.tar.gz`). Select that exact directory and its matching post-route bus-skew report:
+The normal FireSim workflow is: **copy the build's HWDB entry, select the hardware
+and ELF in the runtime files, run `infrasetup`, then run `runworkload`.** You do
+not need our hardware-manifest generator or driver-packaging helper for this path.
 
-```bash
-export XRSIGHT_BUILD_OUTPUT=/absolute/path/to/cl_xilinx_alveo_u250-firesim-FireSim-FireSimILLIXRQuadRocketDualGemminiSaturnConfig-BaseXilinxAlveoU250Config
-export XRSIGHT_BUS_SKEW_REPORT="$XRSIGHT_BUILD_OUTPUT/vivado_proj/firesim.runs/impl_1/overall_fpga_top_bus_skew_postroute_physopted.rpt"
-export XRSIGHT_HARDWARE="$XRSIGHT_HW_WORK/hardware.json"
-"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/check_firesim_platform.py" \
-  --chipyard "$CHIPYARD_DIR" --config "$XRSIGHT_HW" \
-  --staging-dir "$XRSIGHT_STAGING" --rtl "$XRSIGHT_RTL" \
-  --elaboration-log "$XRSIGHT_HW_WORK/elaboration.log" \
-  --build-output "$XRSIGHT_BUILD_OUTPUT" --bus-skew-report "$XRSIGHT_BUS_SKEW_REPORT" \
-  --firmware "$XRSIGHT_FIRMWARE" --output "$XRSIGHT_HARDWARE"
-python3 "$XRSIGHT_ROOT/scripts/setup_firesim.py" package-driver \
-  --chipyard "$CHIPYARD_DIR" --hardware "$XRSIGHT_HARDWARE" \
-  --output-dir "$XRSIGHT_HW_WORK/packages"
+The examples below use `/home/illixrtest/xrsight-work` and a quad-core dual-Gemmini
+image. Replace that home directory with yours. Run FireSim commands from
+`chipyard/sims/firesim/deploy` after sourcing `sourceme-manager.sh` as described
+above. YAML paths must be literal paths: `$HOME`, `$XRSIGHT_WORK`, and `~` are not
+expanded inside YAML.
+
+#### 1. Copy the completed build into the HWDB
+
+At the end of `firesim buildbitstream`, FireSim prints an entry to add to
+`config_hwdb.yaml`. It also saves it under `deploy/built-hwdb-entries/`.
+**Copy that entire entry into `deploy/config_hwdb.yaml`.** Keep its
+`bitstream_tar` path and `deploy_quintuplet_override` exactly as generated.
+For this example its name is `illixr_u250_rocket_dual_gemmini_saturn_quad`.
+
+Leave `custom_runtime_config: null`; the tested memory settings are supplied in
+the runtime YAML below. You can omit `driver_tar`: FireSim builds/packages the
+matching host driver during `infrasetup` using this checkout. Keep the same
+patched source checkout used to build the image. You do not need to create a
+driver archive by hand.
+
+Before programming, confirm that the Vivado implementation reports show completed
+routing and passing final setup/hold and bus-skew timing. The optional
+[recorded-run guide](docs/firesim-recorded-runs.md) automates these checks and
+records artifact hashes.
+
+#### 2. Point a workload at your ELF
+
+Create `deploy/workloads/xrsight.json` with:
+
+```json
+{
+  "benchmark_name": "xrsight",
+  "common_bootbinary": "zephyr.elf",
+  "common_rootfs": null,
+  "common_outputs": [],
+  "common_simulation_outputs": ["uartlog", "memory_stats0.csv"],
+  "workloads": [{"name": "xrsight"}]
+}
 ```
 
-The checker requires final routed timing closure and complete routing; synthesis success or manager exit alone is insufficient. It also hashes the bitstream archive, driver, headers, boot ROM, and generated descriptions. The driver packager preserves the matching driver, its host shared libraries, and the tested runtime configuration. A FireSim bitstream archive is more than a raw `.bit` file.
+Put your matching firmware at `deploy/workloads/xrsight/zephyr.elf`. For example,
+from the `deploy` directory, after packaging the quad-core workload:
 
-`configure --hardware-manifest` then writes the HWDB entry automatically:
+```bash
+mkdir -p workloads/xrsight
+cp ~/xrsight-work/artifacts/quad-eye-rvvpack/zephyr.elf workloads/xrsight/zephyr.elf
+```
+
+For a new image, run the platform-preflight ELF first (built in a separate build
+directory with `-DILLIXR_PLATFORM_CHECK_ONLY=ON`). Use the same workload definition
+but copy the preflight ELF to that filename. After the hart/atomic/timer and enabled
+accelerator checks pass and the program exits normally, copy the full-workload
+ELF and repeat `infrasetup` and `runworkload`. The core count and accelerators in
+the ELF must match the image. `common_rootfs: null` is intentional: the dataset is
+embedded in the ELF, and this run has no Linux filesystem image.
+
+#### 3. Fill in the runtime YAML
+
+Create `deploy/config_runtime_xrsight.yaml` using the following complete example.
+The machine-specific fields are **`default_simulation_dir`** (a writable run
+folder) and **`default_fpga_db`** (your U250 discovery file). Set
+**`default_hw_config`** to the exact entry name you pasted into `config_hwdb.yaml`.
+**`workload_name`** names the JSON file from step 2.
 
 ```yaml
-illixr_u250_rocket_dual_gemmini_saturn_quad:
-  bitstream_tar: file:///ABS/firesim.tar.gz
-  driver_tar: file:///ABS/driver-bundle.tar.gz
-  deploy_quintuplet_override: xilinx_alveo_u250-firesim-FireSim-FireSimILLIXRQuadRocketDualGemminiSaturnConfig-BaseXilinxAlveoU250Config
-  custom_runtime_config: illixr-quad-runtime.conf
+run_farm:
+  base_recipe: run-farm-recipes/externally_provisioned.yaml
+  recipe_arg_overrides:
+    run_farm_tag: xrsight-rtos
+    default_platform: XilinxAlveoU250InstanceDeployManager
+    default_simulation_dir: /home/illixrtest/xrsight-work/runs/quad-eye-1
+    default_fpga_db: /opt/firesim-db.json
+    run_farm_host_specs:
+      - one_u250:
+          num_fpgas: 1
+          num_metasims: 0
+          use_for_switch_only: 0
+    run_farm_hosts_to_use:
+      - localhost: one_u250
+
+metasimulation:
+  metasimulation_enabled: false
+  metasimulation_host_simulator: verilator
+  metasimulation_only_plusargs: ""
+  metasimulation_only_vcs_plusargs: ""
+
+target_config:
+  topology: no_net_config
+  no_net_num_nodes: 1
+  link_latency: 6405
+  switching_latency: 10
+  net_bandwidth: 200
+  profile_interval: 1000000
+  default_hw_config: illixr_u250_rocket_dual_gemmini_saturn_quad
+  plusarg_passthrough: >-
+    +max-cycles=100000000000
+    +mm_readLatency_0=30 +mm_writeLatency_0=30
+    +mm_readMaxReqs_0=10 +mm_writeMaxReqs_0=10
+    +mm_useHardwareDefaultRuntimeSettings_0
+    +fesvr-step-size=10000 +idle-counts=1 +fesvr-wait-ticks=8
+
+tracing:
+  enable: false
+  output_format: 0
+  selector: 1
+  start: 0
+  end: -1
+
+autocounter:
+  read_rate: 0
+
+workload:
+  workload_name: xrsight.json
+  terminate_on_completion: false
+  suffix_tag: quad-eye-1
+
+host_debug:
+  zero_out_dram: true
+  disable_synth_asserts: false
+
+synth_print:
+  start: 0
+  end: -1
+  cycle_prefix: true
 ```
 
-Keep bitstream and driver from the same build. The tested runtime configuration uses:
+Keep the listed memory plusargs: the request limit is **10**, not 16, because the
+compiled field is only four bits wide. These are the same FASED settings used in
+our accepted runs. For each new run, change the run folder and `suffix_tag` so
+previous output is preserved. For preflight, use names such as `quad-preflight-1`.
 
-```text
-+mm_readLatency_0=30
-+mm_writeLatency_0=30
-+mm_readMaxReqs_0=10
-+mm_writeMaxReqs_0=10
-+mm_useHardwareDefaultRuntimeSettings_0
-+fesvr-step-size=10000
-+idle-counts=1
-+fesvr-wait-ticks=8
-```
+#### 4. Program and run
 
-The value 16 is invalid for the compiled four-bit outstanding-request fields; it previously blocked memory traffic. FASED timing also differs from Verilator's DRAMSim2, so cross-simulator performance comparisons must identify the memory model.
-
-### Runtime configuration, programming, and execution
-
-Use a new run directory and unique workload name for every preflight or workload. First set `XRSIGHT_FIRMWARE` to the packaged **preflight**; repeat the same steps with the full workload only after the preflight passes.
+Confirm that the U250 is idle; coordinate access if other users share it. From
+`deploy`, run:
 
 ```bash
-export XRSIGHT_RUN="$XRSIGHT_WORK/runs/quad-eye-preflight-1"
-"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/setup_firesim.py" configure \
-  --chipyard "$CHIPYARD_DIR" --work "$XRSIGHT_RUN" --config "$XRSIGHT_HW" \
-  --elf "$XRSIGHT_FIRMWARE/zephyr.elf" --fpga-db "$XRSIGHT_FPGA_DB" \
-  --hardware-manifest "$XRSIGHT_HARDWARE" --workload-name quad-eye-preflight-1
+firesim infrasetup -c config_runtime_xrsight.yaml -a config_hwdb.yaml
 ```
 
-This writes `config_runtime.yaml`, `config_hwdb.yaml`, the recipe files, `case.json`, and the bare-metal workload JSON. It installs conflict-checked workload links under FireSim's `deploy/workloads/`. The generated runtime selects:
-
-- Externally provisioned localhost with one U250 and an explicit FPGA database.
-- `default_simulation_dir: <run>/runfarm`, one no-network target, and the selected HWDB alias.
-- `profile_interval: 1000000` and `+max-cycles=100000000000`.
-- Tracing disabled, DRAM zeroing enabled, and synthesized assertions enabled.
-- The generated workload JSON, whose `common_bootbinary` is `zephyr.elf`, `common_rootfs` is `null`, and simulation outputs include `uartlog` and `memory_stats0.csv`.
-
-The complete [runtime template](config/firesim/config_runtime.yaml.in) shows every field. No FireMarshal Linux disk image is involved: FireSim's TSI/loadmem path loads the ELF, including its embedded sensor samples.
-
-Hold the same host-wide advisory lock across programming and execution. All users of the shared board should agree on its path. Also inspect the board's idle state; a lock alone cannot detect unrelated software that does not use it.
+This prepares the matching driver, programs the FPGA, and stages the workload.
+After it succeeds:
 
 ```bash
-set -e
-export XRSIGHT_FPGA_LOCK=/tmp/xrsight-u250.lock
-exec 9>"$XRSIGHT_FPGA_LOCK"
-flock -n 9
-"$XRSIGHT_PYTHON" - "$XRSIGHT_ROOT" "$XRSIGHT_FPGA_DB" <<'PY'
-import pathlib, sys
-sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / 'scripts'))
-from run_firesim_matrix import assert_board_free
-print(assert_board_free(pathlib.Path(sys.argv[2])))
-PY
-cd "$XRSIGHT_DEPLOY"
-firesim infrasetup -c "$XRSIGHT_RUN/config_runtime.yaml" \
-  -a "$XRSIGHT_RUN/config_hwdb.yaml" -r "$XRSIGHT_RUN/config_build_recipes.yaml"
-"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/collect_firesim_results.py" record \
-  --manager-dir "$XRSIGHT_DEPLOY" --runtime-dir "$XRSIGHT_RUN" \
-  --execution "$XRSIGHT_RUN/execution.json" --timeout 86400 -- \
-  firesim runworkload -c "$XRSIGHT_RUN/config_runtime.yaml" \
-    -a "$XRSIGHT_RUN/config_hwdb.yaml" -r "$XRSIGHT_RUN/config_build_recipes.yaml"
-flock -u 9
-exec 9>&-
+timeout --foreground --signal=INT --kill-after=60s 24h \
+  firesim runworkload -c config_runtime_xrsight.yaml -a config_hwdb.yaml
 ```
 
-Run this block in a shell with `set -e` so a failed lock, idle check, or programming step stops execution. The recorder preserves the manager result, watchdog outcome, and host runtime. Timeout cleanup targets only processes belonging to this run's private directory; it does not issue broad process-name kills. Never terminate unrelated FPGA work. A timeout or interruption remains incomplete, even if some poses were emitted.
+The command is ordinary `firesim runworkload` with a 24-hour host watchdog; the
+runtime YAML also sets the 100-billion-target-cycle limit. A timeout or
+interruption is incomplete, never a passing run. If interrupted, check the board
+and simulator state before starting another run; do not assume the FPGA is idle.
 
-In another terminal:
+Monitor it in another terminal:
 
 ```bash
 screen -ls
 screen -r fsim0
-# Detach with Ctrl-a, d. Or monitor the file directly:
-tail -f "$XRSIGHT_RUN/runfarm/sim_slot_0/uartlog"
+# Detach with Ctrl-a, d. Or read the UART directly:
+tail -f /home/illixrtest/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog
 ```
 
-Trace records are buffered during processing and exported in batches at shutdown, so absence of continuously printed poses is not itself a hang. Run the result collector below before declaring either the preflight or workload a pass.
+FireSim copies completed workload outputs into `deploy/results-workload/`.
+The firmware exports buffered trace batches at shutdown, so a quiet UART during
+processing does not by itself mean the run is stuck. See [Outputs and analysis](#outputs-and-analysis)
+to decode the trace. For automated hardware checks and complete acceptance
+reports, use the separate [recorded-run workflow](docs/firesim-recorded-runs.md).
 
 ## Outputs and analysis
 
@@ -642,10 +710,10 @@ Trace records are buffered during processing and exported in batches at shutdown
 
 | Location | Contents |
 |---|---|
-| `$XRSIGHT_RUN/runfarm/sim_slot_0/uartlog` | Live firmware output and FireSim exit/cycle records |
-| `$XRSIGHT_RUN/runfarm/sim_slot_0/memory_stats0.csv` | Periodic FASED statistics and available AXI error indicators |
+| `<default_simulation_dir>/sim_slot_0/uartlog` | Live firmware output and FireSim exit/cycle records |
+| `<default_simulation_dir>/sim_slot_0/memory_stats0.csv` | Periodic FASED statistics and available AXI error indicators |
 | `$XRSIGHT_DEPLOY/results-workload/<timestamp>-<workload>/` | Manager-collected simulation outputs |
-| `$XRSIGHT_RUN/manager-runworkload.log`, `execution.json` | Manager log, return status, watchdog/interruption state, and host elapsed time |
+| Recorded-run helper output (optional) | `manager-runworkload.log`, `execution.json`, return status, watchdog/interruption state, and host elapsed time |
 | `$XRSIGHT_FIRMWARE/` | ELF, compiled config/DTS, dataset manifest, BLAS audit, build provenance, and hashes |
 | Collector output directory | Preserved raw UART, decoded `console.log`, `trace-transfer.json`, native outputs, `analysis.json`, `run.json`, and evidence manifests |
 
@@ -676,26 +744,19 @@ cmake --build "$XRSIGHT_NATIVE" --target estimator_replay prediction_reference -
 
 These are ordinary host builds, with no Zephyr toolchain file. The native harness disables Eigen parallel/vector reductions and FP contraction for its reference comparisons. See [native test documentation](tests/native/README.md).
 
-### Collect and validate a complete case
+### Inspect results or run full acceptance checks
 
-Use the collector for acceptance; it reuses the full FireSim analyzer, including exit/watchdog/cycle status, hardware and firmware identity, dataset hashes, FASED evidence, native estimator replay, independent prediction/transform checks, and enabled eye-stage checks:
+The manual workflow above produces FireSim logs directly. For the complete
+acceptance report, use the [recorded-run workflow](docs/firesim-recorded-runs.md),
+which also captures hardware/firmware identity and execution metadata. Do not
+invent `case.json` or `execution.json` for a manual run merely to make the collector
+accept it.
 
-```bash
-"$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/collect_firesim_results.py" collect \
-  --runtime-dir "$XRSIGHT_RUN" --firmware-dir "$XRSIGHT_FIRMWARE" \
-  --hardware-manifest "$XRSIGHT_HARDWARE" --dataset "$EUROC_MAV0" \
-  --native "$XRSIGHT_NATIVE/estimator_replay" \
-  --prediction-native "$XRSIGHT_NATIVE/prediction_reference" \
-  --output "$XRSIGHT_RUN/collected"
-```
-
-The destination must be new or empty. The collector copies evidence before normalization and returns nonzero on failure/incompleteness. Do not edit execution metadata to convert an interrupted run into a pass. `case.json` comes from setup and `execution.json` from the recording wrapper; preserved older runs can use explicit `--case` and `--execution` paths.
-
-For inspection only, the lower-level sequence is:
+For a quick inspection of a manual run, use:
 
 ```bash
 mkdir -p "$XRSIGHT_WORK/inspection"
-cp "$XRSIGHT_RUN/runfarm/sim_slot_0/uartlog" "$XRSIGHT_WORK/inspection/console.log"
+cp /home/illixrtest/xrsight-work/runs/quad-eye-1/sim_slot_0/uartlog "$XRSIGHT_WORK/inspection/console.log"
 "$XRSIGHT_PYTHON" "$XRSIGHT_ROOT/scripts/trace_batches.py" "$XRSIGHT_WORK/inspection/console.log"
 "$XRSIGHT_NATIVE/estimator_replay" --dataset "$EUROC_MAV0" \
   --trace "$XRSIGHT_WORK/inspection/console.log" --output "$XRSIGHT_WORK/inspection/native.log"
